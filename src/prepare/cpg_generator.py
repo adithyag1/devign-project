@@ -1,0 +1,141 @@
+import json
+import re
+import subprocess
+import os.path
+import os
+import time
+from .cpg_client_wrapper import CPGClientWrapper
+#from ..data import datamanager as data
+
+
+def funcs_to_graphs(funcs_path):
+    client = CPGClientWrapper()
+    # query the cpg for the dataset
+    print(f"Creating CPG.")
+    graphs_string = client(funcs_path)
+    # removes unnecessary namespace for object references
+    graphs_string = re.sub(r"io\.shiftleft\.codepropertygraph\.generated\.", '', graphs_string)
+    graphs_json = json.loads(graphs_string)
+
+    return graphs_json["functions"]
+
+"""
+def graph_indexing(graph):
+    idx = int(graph["file"].split(".c")[0].split("/")[-1])
+    del graph["file"]
+    return idx, {"functions": [graph]}
+"""
+#changed
+def graph_indexing(graph):
+    try:
+        file_path = graph["file"]
+        file_name = file_path.split("/")[-1]
+        file_id = file_name.split(".c")[0]
+        idx = int(file_id)
+        del graph["file"]
+        return idx, {"functions": [graph]}
+    except:
+        return None, None  
+
+def joern_parse(joern_path, input_path, output_path, file_name):
+    out_file = file_name + ".bin"
+    joern_parse_call = subprocess.run(["./" + joern_path + "joern-parse", input_path, "--output", output_path + out_file],
+                                      stdout=subprocess.PIPE, text=True, check=True)
+    print(str(joern_parse_call))
+    return out_file
+
+
+def joern_create(joern_path, in_path, out_path, cpg_files):
+    json_files = []
+    # Resolve the devign_project root from src/prepare/
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    joern_bin = os.path.join(project_root, "joern", "joern-cli", "joern")
+    # Updated to the singular filename
+    base_script = os.path.join(project_root, "joern", "graph-for-funcs.sc")
+    
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+
+    for cpg_file in cpg_files:
+        json_file_name = f"{cpg_file.replace('.bin', '')}.json"
+        json_files.append(json_file_name)
+        
+        cpg_full_path = os.path.abspath(os.path.join(in_path, cpg_file))
+        json_out_path = os.path.abspath(os.path.join(out_path, json_file_name))
+        
+        if os.path.exists(cpg_full_path):
+            print(f"Exporting JSON for {cpg_file}...")
+            
+            # The Scala script writes this to the current working directory (project root)
+            script_out_name = os.path.join(os.getcwd(), "last_graph_export.json")
+            if os.path.exists(script_out_name):
+                os.remove(script_out_name)
+
+            tmp_script_path = os.path.abspath("tmp_export.sc")
+            with open(tmp_script_path, "w") as f:
+                f.write(f'importCpg("{cpg_full_path}")\n')
+                f.write(f'runScript("{base_script}", Map.empty[String, String], cpg)\n')
+                f.write(f'delete\n')
+
+            try:
+                subprocess.run(
+                    [joern_bin, "--script", tmp_script_path],
+                    check=True, capture_output=True, text=True
+                )
+                
+                # Move the file to data/cpg/ once generated
+                if os.path.exists(script_out_name):
+                    os.rename(script_out_name, json_out_path)
+                    print(f"Successfully created {json_file_name}")
+                else:
+                    print(f"ERROR: Scala script failed to produce {script_out_name}")
+            
+            except subprocess.CalledProcessError as e:
+                print(f"JOERN EXECUTION FAILED: {e.stderr}")
+            finally:
+                if os.path.exists(tmp_script_path):
+                    os.remove(tmp_script_path)
+                
+    return json_files
+
+def json_process(in_path, json_file):
+    file_full_path = os.path.join(in_path, json_file)
+    if os.path.exists(file_full_path):
+        with open(file_full_path) as jf:
+            cpg_string = jf.read().strip()
+            if not cpg_string: # Check if file is empty
+                print(f"Warning: {json_file} is empty.")
+                return None
+            cpg_string = re.sub(r"io\.shiftleft\.codepropertygraph\.generated\.", '', cpg_string)
+            try:
+                cpg_json = json.loads(cpg_string)
+                container = [graph_indexing(graph) for graph in cpg_json["functions"] if (graph["file"] != "N/A" and graph["file"]!="<empty>")]
+                return [c for c in container if c[0] is not None]
+            except json.JSONDecodeError:
+                print(f"Error: Failed to decode JSON in {json_file}")
+                return None
+    return None
+
+'''
+def generate(dataset, funcs_path):
+    dataset_size = len(dataset)
+    print("Size: ", dataset_size)
+    graphs = funcs_to_graphs(funcs_path[2:])
+    print(f"Processing CPG.")
+    container = [graph_indexing(graph) for graph in graphs["functions"] if graph["file"] != "N/A"]
+    graph_dataset = data.create_with_index(container, ["Index", "cpg"])
+    print(f"Dataset processed.")
+
+    return data.inner_join_by_index(dataset, graph_dataset)
+'''
+
+# client = CPGClientWrapper()
+# client.create_cpg("../../data/joern/")
+# joern_parse("../../joern/joern-cli/", "../../data/joern/", "../../joern/joern-cli/", "gen_test")
+# print(funcs_to_graphs("/data/joern/"))
+"""
+while True:
+    raw = input("query: ")
+    response = client.query(raw)
+    print(response)
+"""

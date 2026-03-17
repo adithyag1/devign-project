@@ -1,0 +1,11 @@
+backup/*
+data/input/*
+data/tokens/*
+data/w2v/*
+data/cpg/*
+*pycache*
+*.log
+joern/joern-cli/*
+LICENSE
+Miniconda3*
+
