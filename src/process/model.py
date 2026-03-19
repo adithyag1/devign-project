@@ -87,7 +87,6 @@ class Net(nn.Module):
             nn.Linear(gated_graph_conv_args["out_channels"], 50),
             nn.ReLU(),
             nn.Linear(50, 1),
-            nn.Sigmoid()
         ).to(device)
 
     def forward(self, data):
