@@ -13,7 +13,7 @@ class LoaderStep:
 
         progress_bar = tqdm(self.loader, desc=f"{self.name} Step", leave=False)
 
-        for i, batch in enumerate(self.loader):
+        for i, batch in enumerate(progress_bar):
             # RE-ASSIGN the batch to the device
             batch = batch.to(self.device) 
             

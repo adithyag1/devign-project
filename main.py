@@ -34,8 +34,8 @@ def select(dataset):
     result = result.loc[result.func.str.len() < 1200]
     
     # Use .sample instead of .head to get a diverse variety of code
-    vulnerable = result[result['target'] == 1].sample(n=min(len(result[result['target'] == 1],random_state=42), 500))
-    non_vulnerable = result[result['target'] == 0].sample(n=min(len(result[result['target'] == 0],random_state=42), 500))
+    vulnerable = result[result['target'] == 1].sample(n=min(len(result[result['target'] == 1], 500), random_state=42))
+    non_vulnerable = result[result['target'] == 0].sample(n=min(len(result[result['target'] == 0], 500), random_state=42))
     
     print(f"Selected {len(vulnerable)} vulnerable and {len(non_vulnerable)} non-vulnerable functions.")
     return pd.concat([vulnerable, non_vulnerable]).sample(frac=1)

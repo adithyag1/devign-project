@@ -1,6 +1,7 @@
 backup/*
 data/input/*
 data/tokens/*
+data/model/*
 data/w2v/*
 data/cpg/*
 *pycache*
@@ -8,4 +9,4 @@ data/cpg/*
 joern/joern-cli/*
 LICENSE
 Miniconda3*
-
+misc.py

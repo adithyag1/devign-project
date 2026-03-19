@@ -41,7 +41,7 @@ class GraphsEmbedding:
                         edge_index[1].append(mapping[t_id])
                     else:
                         # DEBUG: See what we are missing
-                        print(f"DEBUG: s_id={s_id} (type {type(s_id)}), keys={list(mapping.keys())[:5]}")
+                        # print(f"DEBUG: s_id={s_id} (type {type(s_id)}), keys={list(mapping.keys())[:5]}")
                         pass
         return edge_index
                     
