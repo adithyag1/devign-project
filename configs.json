@@ -1,6 +1,6 @@
 {
     "devign": {
-        "learning_rate" : 1e-4,
+        "learning_rate" : 5e-5,
         "weight_decay" : 1.3e-6,
         "loss_lambda" : 1.3e-6,
         "weight_0": 1.0,
@@ -50,7 +50,9 @@
         "patience" : 30,
         "batch_size" : 8,
         "dataset_ratio" : 0.2,
-        "shuffle" : true
+        "shuffle" : true,
+        "accumulation_steps": 4,
+        "warmup_epochs": 2
     },
     "changes": [
         "nodes_dim, emb_size were 205, 101",

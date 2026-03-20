@@ -19,6 +19,14 @@ class Step:
         self.optimizer = optimizer
         self.w0 = devign_config.weight_0
         self.w1 = devign_config.weight_1
+        # Gradient accumulation: update weights every N batches
+        self.accumulation_steps = 1
+        # Gradient clipping max norm (0 disables clipping)
+        self.clip_grad_norm = 1.0
+        # Internal counter for accumulation
+        self._accum_count = 0
+        # Start with clean gradients
+        self.optimizer.zero_grad()
 
     def __call__(self, i, batch_data, y):
         # 1. The model now returns raw LOGITS (no sigmoid)
@@ -30,7 +38,6 @@ class Step:
         probs = torch.sigmoid(logits)
         
         # 3. Weighted Loss Logic using the Logit-stable function
-        # Weights: 2.0 for Clean (0), 1.0 for Vulnerable (1)
         loss_weights = torch.where(target == 0, self.w0, self.w1).to(target.device)
         
         # Use binary_cross_entropy_with_logits for numerical stability
@@ -41,9 +48,16 @@ class Step:
         acc = binary_accuracy(probs, target)
 
         if self.model.training:
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+            # Scale loss by accumulation steps before backward
+            scaled_loss = loss / self.accumulation_steps
+            scaled_loss.backward()
+            self._accum_count += 1
+
+            if self._accum_count % self.accumulation_steps == 0:
+                if self.clip_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
         # IMPORTANT: Return probs (0-1), not logits (-inf to +inf)
         return stats.Stat(probs.tolist(), loss.item(), acc.item(), y.tolist())

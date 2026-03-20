@@ -111,7 +111,7 @@ class TripleViewNet(nn.Module):
         self.feature_proj = nn.Linear(feature_dim, feature_dim).to(device)
         
         # CHANGE 2: Add a Dropout layer for the input features
-        self.input_dropout = nn.Dropout(0.3).to(device) 
+        self.input_dropout = nn.Dropout(0.1).to(device) 
 
         self.ast_gnn = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
         self.cfg_gnn = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
@@ -119,11 +119,11 @@ class TripleViewNet(nn.Module):
         
         self.pool = GlobalAttention(gate_nn=nn.Linear(128, 1)).to(device)
         
-        # CHANGE 3: Update Classifier to use LeakyReLU and more Dropout
+        # CHANGE 3: Update Classifier to use LeakyReLU and moderate Dropout
         self.classifier = nn.Sequential(
             nn.Linear(384, 128),
             nn.LeakyReLU(0.01), # Changed from ReLU
-            nn.Dropout(0.4),    # Increased dropout
+            nn.Dropout(0.2),    # Reduced from 0.4
             nn.Linear(128, 1),
         ).to(device)
 
