@@ -136,13 +136,20 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         weight_0=devign_configs.weight_0,
         weight_1=devign_configs.weight_1
     )
-    
+
+    # Configure gradient accumulation on the model (Step) instance
+    accumulation_steps = context.accumulation_steps or 1
+    model.accumulation_steps = accumulation_steps
+
     input_files = data.get_directory_files(PATHS.input)
 
     if not evaluate_only:
         print(f"Starting Sequential Training for {context.epochs} epochs...")
         trainer = process.Train(model, epochs=1, verbose=False) 
         
+        warmup_epochs = context.warmup_epochs or 0
+        base_lr = devign_configs.learning_rate
+
         early_stopping = None
         if use_early_stopping:
             # We set verbose=True here so the Bjarten class prints when it saves
@@ -152,11 +159,29 @@ def process_task(use_early_stopping=False, evaluate_only=False):
             print(f"\n{'='*20} Epoch {epoch+1}/{context.epochs} {'='*20}")
             random.shuffle(input_files)
             
-            # New: Track losses for the whole epoch
+            # Track losses for the whole epoch
             epoch_val_losses = []
+
+            # Learning rate warmup: linearly increase LR from base_lr/warmup_epochs to base_lr
+            if warmup_epochs > 0 and epoch < warmup_epochs:
+                warmup_lr = base_lr * (epoch + 1) / warmup_epochs
+                for param_group in model.optimizer.param_groups:
+                    param_group['lr'] = warmup_lr
+                print(f"  LR warmup: {warmup_lr:.2e}")
 
             for f in input_files:
                 chunk_df = data.load(PATHS.input, f).reset_index(drop=True)
+
+                # Calculate dynamic class weights from training chunk distribution
+                if 'target' in chunk_df.columns:
+                    class_counts = chunk_df['target'].value_counts()
+                    total_samples = len(chunk_df)
+                    count_0 = max(class_counts.get(0, 1), 1)
+                    count_1 = max(class_counts.get(1, 1), 1)
+                    weight_0 = total_samples / (2.0 * count_0)
+                    weight_1 = total_samples / (2.0 * count_1)
+                    model.update_weights(weight_0, weight_1)
+
                 splits = data.train_val_test_split(chunk_df, shuffle=context.shuffle)
                 
                 # train=0, test=1, val=2
@@ -181,8 +206,8 @@ def process_task(use_early_stopping=False, evaluate_only=False):
             # 1. Calculate average epoch loss
             avg_val_loss = sum(epoch_val_losses) / len(epoch_val_losses)
 
-            # 2. Step the scheduler if it exists
-            if hasattr(model, 'scheduler'):
+            # 2. Step the scheduler (only after warmup completes)
+            if hasattr(model, 'scheduler') and epoch >= warmup_epochs:
                 model.scheduler.step(avg_val_loss)
 
             # 3. Handle Early Stopping vs Manual Save

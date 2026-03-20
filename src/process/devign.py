@@ -18,10 +18,9 @@ class Devign(Step):
         self.lr = learning_rate
         self.wd = weight_decay
         self.ll = loss_lambda
-        self.w0 = weight_0
-        self.w1 = weight_1
+        self.device = device
         
-        log.log_info('devign', f"LR: {self.lr}; WD: {self.wd}; LL: {self.ll}; W0: {self.w0}; W1: {self.w1}")
+        log.log_info('devign', f"LR: {self.lr}; WD: {self.wd}; LL: {self.ll}; W0: {weight_0}; W1: {weight_1}")
         
         # FIX: Define _model by moving the passed model to the device
         _model = model.to(device)
@@ -33,14 +32,27 @@ class Devign(Step):
             return F.binary_cross_entropy_with_logits(o, t, weight=weights) + F.l1_loss(o, t) * self.ll
 
         self.optimizer = optim.Adam(_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.7, patience=10
+        )
 
         super().__init__(model=_model,
                          loss_function=weighted_loss,
                          optimizer=self.optimizer
                          )
 
+        # Re-assign after super().__init__() to ensure the passed values are used,
+        # not the defaults read from config inside Step.__init__()
+        self.w0 = weight_0
+        self.w1 = weight_1
+
         self.count_parameters()
+
+    def update_weights(self, weight_0, weight_1):
+        """Update class weights dynamically based on data distribution."""
+        self.w0 = weight_0
+        self.w1 = weight_1
+        log.log_info('devign', f"Updated weights - W0: {weight_0:.4f}; W1: {weight_1:.4f}")
 
     def load(self):
         try:

@@ -128,6 +128,14 @@ class Process(Config):
     def shuffle(self):
         return self.get_property('shuffle')
 
+    @property
+    def accumulation_steps(self):
+        return self.get_property('accumulation_steps')
+
+    @property
+    def warmup_epochs(self):
+        return self.get_property('warmup_epochs')
+
 
 class Devign(Config):
     def __init__(self):
