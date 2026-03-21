@@ -10,7 +10,6 @@
 
 import argparse
 import gc
-import random
 import torch
 from tqdm import tqdm
 import shutil
@@ -133,11 +132,18 @@ def embed_task():
         del cpg_dataset
         gc.collect()
 
+def split_task():
+    """Create (or refresh) and save the global train/val/test split indices once."""
+    print("Creating global train/val/test split...")
+    data.global_train_val_test_split(PATHS.input, "data/")
+    print("Split indices saved to data/split_indices.pkl.")
+
+
 def process_task(use_early_stopping=False, evaluate_only=False):
     context = configs.Process()
     devign_configs = configs.Devign()
-    feature_dim = 769 
-    
+    feature_dim = 769
+
     model_obj = process.TripleViewNet(feature_dim=feature_dim, device=DEVICE)
     model_path = PATHS.model + FILES.model
     model = process.Devign(
@@ -148,138 +154,81 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         weight_0=devign_configs.weight_0,
         weight_1=devign_configs.weight_1
     )
+    model.accumulation_steps = context.accumulation_steps or 1
 
-    # Configure gradient accumulation on the model (Step) instance
-    accumulation_steps = context.accumulation_steps or 1
-    model.accumulation_steps = accumulation_steps
+    # ── Global stratified split ──────────────────────────────────────────────
+    # Loads ALL input files once and performs a SINGLE stratified 80/10/10
+    # split across the entire dataset.  Split indices are cached in
+    # data/split_indices.pkl so that training and evaluation always use the
+    # exact same disjoint subsets.
+    print("Loading global train/val/test split...")
+    train_df, val_df, test_df = data.global_train_val_test_split(PATHS.input, "data/")
 
-    input_files = data.get_directory_files(PATHS.input)
+    # Compute class weights from the training set only
+    weight_0, weight_1 = data.compute_class_weights(train_df)
+    model.update_weights(weight_0, weight_1)
+
+    # Build DataLoaders once – PyTorch resets the iterator each epoch automatically
+    train_loader = data.InputDataset(train_df).get_loader(context.batch_size, shuffle=context.shuffle)
+    val_loader   = data.InputDataset(val_df).get_loader(context.batch_size, shuffle=False)
+    test_loader  = data.InputDataset(test_df).get_loader(context.batch_size, shuffle=False)
 
     if not evaluate_only:
-        print(f"Starting Sequential Training for {context.epochs} epochs...")
-        trainer = process.Train(model, epochs=1, verbose=False) 
-        
+        print(f"Starting Training for {context.epochs} epochs "
+              f"(train={len(train_df)}, val={len(val_df)})...")
+        trainer = process.Train(model, epochs=1, verbose=False)
+
         warmup_epochs = context.warmup_epochs or 0
         base_lr = devign_configs.learning_rate
 
         early_stopping = None
         if use_early_stopping:
-            # We set verbose=True here so the Bjarten class prints when it saves
             early_stopping = process.EarlyStopping(model, patience=context.patience, verbose=True)
-        
+
         for epoch in range(context.epochs):
             print(f"\n{'='*20} Epoch {epoch+1}/{context.epochs} {'='*20}")
-            random.shuffle(input_files)
-            
-            # Track losses for the whole epoch
-            epoch_val_losses = []
 
-            # Learning rate warmup: linearly increase LR from base_lr/warmup_epochs to base_lr
+            # Linear LR warm-up
             if warmup_epochs > 0 and epoch < warmup_epochs:
                 warmup_lr = base_lr * (epoch + 1) / warmup_epochs
                 for param_group in model.optimizer.param_groups:
                     param_group['lr'] = warmup_lr
                 print(f"  LR warmup: {warmup_lr:.2e}")
 
-            for f in input_files:
-                chunk_df = data.load(PATHS.input, f).reset_index(drop=True)
+            train_step = process.LoaderStep("Train", train_loader, DEVICE)
+            val_step   = process.LoaderStep("Validation", val_loader, DEVICE)
 
-                # Calculate dynamic class weights from training chunk distribution
-                if 'target' in chunk_df.columns:
-                    class_counts = chunk_df['target'].value_counts()
-                    total_samples = len(chunk_df)
-                    count_0 = max(class_counts.get(0, 1), 1)
-                    count_1 = max(class_counts.get(1, 1), 1)
-                    weight_0 = total_samples / (2.0 * count_0)
-                    weight_1 = total_samples / (2.0 * count_1)
-                    model.update_weights(weight_0, weight_1)
+            trainer(train_step, val_step, early_stopping=None, current_epoch=epoch + 1)
 
-                splits = data.train_val_test_split(chunk_df, shuffle=context.shuffle)
-                
-                # train=0, test=1, val=2
-                train_loader, _, val_loader = [
-                    x.get_loader(context.batch_size, shuffle=context.shuffle) for x in splits
-                ]
-                
-                train_step = process.LoaderStep("Train", train_loader, DEVICE)
-                val_step = process.LoaderStep("Validation", val_loader, DEVICE)
+            # Retrieve per-epoch global metrics directly from LoaderStep
+            train_loss = train_step.stats.loss()
+            train_acc  = train_step.stats.acc()
+            val_loss   = val_step.stats.loss()
+            val_acc    = val_step.stats.acc()
 
-                # IMPORTANT: Pass early_stopping=None here so it doesn't stop inside a chunk
-                trainer(train_step, val_step, early_stopping=None, current_epoch=epoch+1)
-                
-                # Get the val loss from this chunk
-                val_stats = trainer.history.current()[0]
-                epoch_val_losses.append(val_stats.loss())
-                
-                print(f" Chunk {f}: {trainer.history}")
-                del chunk_df, train_loader, val_loader
-                gc.collect()
+            print(f"  Train → Loss: {train_loss:.4f} | Acc: {train_acc:.4f}")
+            print(f"  Val   → Loss: {val_loss:.4f}   | Acc: {val_acc:.4f}")
 
-            # 1. Calculate average epoch loss
-            avg_val_loss = sum(epoch_val_losses) / len(epoch_val_losses)
-
-            # 2. Step the scheduler (only after warmup completes)
+            # Step the LR scheduler after warm-up
             if hasattr(model, 'scheduler') and epoch >= warmup_epochs:
-                model.scheduler.step(avg_val_loss)
+                model.scheduler.step(val_loss)
 
-            # 3. Handle Early Stopping vs Manual Save
+            # Early stopping on global validation loss / manual checkpoint
             if use_early_stopping:
-                # The early_stopping call usually saves the best model automatically
-                if early_stopping(avg_val_loss):
-                    print(f"Early stopping limit reached at Epoch {epoch+1}. Ending training.")
+                if early_stopping(val_loss):
+                    print(f"Early stopping triggered at Epoch {epoch + 1}.")
                     break
             else:
-                # If not using early stopping, save the latest progress manually
                 model.save()
 
     else:
         model.load()
 
-# --- BRANCH 3: FINAL EVALUATION ---
-    print("\n" + "="*25 + " FINAL EVALUATION (Aggregated) " + "="*25)    
-    
-    all_test_graphs = []
-    eval_files = data.get_directory_files(PATHS.input)
-
-    for f in eval_files:
-        chunk_df = data.load(PATHS.input, f).reset_index(drop=True)
-        
-        # 1. Split the DataFrame (returns InputDataset objects)
-        # Order: train, test, val
-        splits = data.train_val_test_split(chunk_df, shuffle=False)
-        test_dataset_obj = splits[1] 
-        
-        # 2. REACH INTO THE DATAFRAME INSIDE THE OBJECT
-        # Most 'InputDataset' implementations store the DF in self.df or self.dataset
-        # Since the error says it found a DataFrame, we need to get the 'input' column
-        if hasattr(test_dataset_obj, 'df'):
-            target_df = test_dataset_obj.df
-        elif hasattr(test_dataset_obj, 'dataset') and isinstance(test_dataset_obj.dataset, pd.DataFrame):
-            target_df = test_dataset_obj.dataset
-        else:
-            # If the object itself is not the DF, it might be the graphs 
-            # but clearly, something is passing a DF to the loader.
-            target_df = chunk_df # Fallback to the chunk itself if split fails
-
-        # 3. EXTRACT THE GRAPH OBJECTS FROM THE 'input' COLUMN
-        if 'input' in target_df.columns:
-            # This extracts only the PyG Data objects (the graphs)
-            graphs = target_df['input'].tolist()
-            all_test_graphs.extend(graphs)
-
-    print(f"Total Test Samples Collected: {len(all_test_graphs)}")
-
-    # 4. Use PyG DataLoader on the FLAT LIST of Graphs
-    from torch_geometric.loader import DataLoader as PyGDataLoader
-    
-    if len(all_test_graphs) > 0:
-        final_loader = PyGDataLoader(all_test_graphs, batch_size=context.batch_size, shuffle=False)
-        final_test_step = process.LoaderStep("Final Test", final_loader, DEVICE)
-
-        # 5. Predict
-        process.predict(model, final_test_step)
-    else:
-        print("Error: No graphs found in the 'input' column of the test files.")
+    # ── Final evaluation on the held-out test set ────────────────────────────
+    print("\n" + "=" * 25 + " FINAL EVALUATION " + "=" * 25)
+    print(f"Test Samples: {len(test_df)}")
+    final_test_step = process.LoaderStep("Final Test", test_loader, DEVICE)
+    process.predict(model, final_test_step)
         
 def main():
     """
@@ -288,6 +237,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--create', action='store_true', help='Create dataset')
     parser.add_argument('-e', '--embed', action='store_true', help='Embed dataset')
+    parser.add_argument('-S', '--split', action='store_true',
+                        help='Create/refresh global train/val/test split indices')
     parser.add_argument('-p', '--process', action='store_true', help='Standard training')
     parser.add_argument('-s', '--stopping', action='store_true', help='Training with early stopping')
     parser.add_argument('-v', '--eval', action='store_true', help='Evaluation only mode')
@@ -298,15 +249,17 @@ def main():
         create_task()
     if args.embed:
         embed_task()
-        
+    if args.split:
+        split_task()
+
     # Standard training (No early stopping)
     if args.process:
         process_task(use_early_stopping=False, evaluate_only=False)
-        
+
     # Training WITH early stopping
     elif args.stopping:
         process_task(use_early_stopping=True, evaluate_only=False)
-        
+
     # Evaluation Only
     elif args.eval:
         process_task(evaluate_only=True)
