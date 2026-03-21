@@ -99,6 +99,9 @@ def embed_task():
         # 4. Embed using a loop with a progress bar
         print(f"Embedding {len(cpg_dataset)} functions with CodeBERT...")
         inputs = []
+        total_ast_edges = 0
+        total_cfg_edges = 0
+        total_pdg_edges = 0
         
         # tqdm gives you a visual progress bar and ETA
         for index, row in tqdm(cpg_dataset.iterrows(), total=len(cpg_dataset), desc="Processing"):
@@ -110,6 +113,15 @@ def embed_task():
                 graphs_embed_instance
             )
             inputs.append(graph_data)
+            total_ast_edges += graph_data.edge_index_ast.shape[1]
+            total_cfg_edges += graph_data.edge_index_cfg.shape[1]
+            total_pdg_edges += graph_data.edge_index_pdg.shape[1]
+        
+        num_functions = max(len(inputs), 1)
+        print(f"[View Statistics] avg edges per function — "
+              f"AST: {total_ast_edges/num_functions:.1f}, "
+              f"CFG: {total_cfg_edges/num_functions:.1f}, "
+              f"PDG: {total_pdg_edges/num_functions:.1f}")
         
         cpg_dataset["input"] = inputs
         

@@ -22,6 +22,7 @@ final case class GraphForFuncsResult(functions: List[GraphForFuncsFunction])
 // JSON Encoders
 implicit val encodeEdge: Encoder[overflowdb.Edge] = (edge: overflowdb.Edge) => Json.obj(
     ("id", Json.fromString(edge.toString)), 
+    ("type", Json.fromString(edge.label())),
     ("in", Json.fromString(edge.inNode.id.toString)), 
     ("out", Json.fromString(edge.outNode.id.toString))
 )
