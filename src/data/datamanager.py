@@ -1,4 +1,5 @@
 import glob
+import pickle
 
 import pandas as pd
 import numpy as np
@@ -95,6 +96,107 @@ def train_val_test_split(data_frame: pd.DataFrame, shuffle=True):
     test = test.reset_index(drop=True)
 
     return InputDataset(train), InputDataset(test), InputDataset(val)
+
+
+def _compute_split(full_df, test_size=0.2, val_size=0.1, random_state=42):
+    """Compute stratified train/val/test index arrays for a DataFrame."""
+    indices = np.arange(len(full_df))
+    targets = full_df['target'].values
+
+    # Split into (train+val) and test
+    train_val_idx, test_idx = train_test_split(
+        indices, test_size=test_size, stratify=targets, random_state=random_state
+    )
+
+    # Split (train+val) into train and val
+    val_fraction = val_size / (1.0 - test_size)
+    train_idx, val_idx = train_test_split(
+        train_val_idx, test_size=val_fraction,
+        stratify=targets[train_val_idx], random_state=random_state
+    )
+
+    return train_idx, val_idx, test_idx
+
+
+def global_train_val_test_split(input_dir, split_path, test_size=0.2, val_size=0.1, random_state=42):
+    """
+    Load ALL input files globally, perform ONE stratified split, and cache the
+    indices to *split_path/split_indices.pkl* for full reproducibility.
+
+    Returns
+    -------
+    (train_df, val_df, test_df) – disjoint DataFrames with 'input' and 'target' columns.
+    """
+    os.makedirs(split_path, exist_ok=True)
+    split_file = os.path.join(split_path, "split_indices.pkl")
+
+    # Load and concatenate all input files (sorted for determinism)
+    all_files = sorted(get_directory_files(input_dir))
+    if not all_files:
+        raise ValueError(f"No input files found in {input_dir}")
+
+    frames = []
+    for f in all_files:
+        df = load(input_dir, f)
+        df = df.reset_index(drop=True)
+        frames.append(df)
+    full_df = pd.concat(frames, ignore_index=True)
+    n_total = len(full_df)
+
+    # Load cached split indices or recompute
+    if os.path.exists(split_file):
+        with open(split_file, 'rb') as fh:
+            split_data = pickle.load(fh)
+
+        if split_data.get('total_samples') == n_total:
+            print(f"Loaded cached split indices ({n_total} samples).")
+            train_idx = split_data['train']
+            val_idx = split_data['val']
+            test_idx = split_data['test']
+        else:
+            print(
+                f"Dataset size changed "
+                f"({split_data.get('total_samples')} → {n_total}), recomputing split..."
+            )
+            train_idx, val_idx, test_idx = _compute_split(
+                full_df, test_size, val_size, random_state
+            )
+            with open(split_file, 'wb') as fh:
+                pickle.dump(
+                    {'total_samples': n_total, 'train': train_idx,
+                     'val': val_idx, 'test': test_idx},
+                    fh
+                )
+    else:
+        print(f"Computing new global split for {n_total} samples...")
+        train_idx, val_idx, test_idx = _compute_split(
+            full_df, test_size, val_size, random_state
+        )
+        with open(split_file, 'wb') as fh:
+            pickle.dump(
+                {'total_samples': n_total, 'train': train_idx,
+                 'val': val_idx, 'test': test_idx},
+                fh
+            )
+
+    train_df = full_df.iloc[train_idx].reset_index(drop=True)
+    val_df = full_df.iloc[val_idx].reset_index(drop=True)
+    test_df = full_df.iloc[test_idx].reset_index(drop=True)
+
+    for label, df in [("Train", train_df), ("Val  ", val_df), ("Test ", test_df)]:
+        pos = int((df['target'] == 1).sum())
+        print(f"  {label}: {len(df)} (pos={pos}, neg={len(df) - pos})")
+
+    return train_df, val_df, test_df
+
+
+def compute_class_weights(data_frame: pd.DataFrame):
+    """Return (weight_0, weight_1) balanced class weights for a training DataFrame."""
+    class_counts = data_frame['target'].value_counts()
+    total = len(data_frame)
+    weight_0 = total / (2.0 * max(int(class_counts.get(0, 1)), 1))
+    weight_1 = total / (2.0 * max(int(class_counts.get(1, 1)), 1))
+    return weight_0, weight_1
 
 
 def get_directory_files(directory):
