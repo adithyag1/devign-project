@@ -1,5 +1,6 @@
 {
     "devign": {
+        
         "learning_rate" : 5e-5,
         "weight_decay" : 1.3e-6,
         "loss_lambda" : 1.3e-6,
@@ -45,10 +46,14 @@
             }
     },
     "process" : {
-    "epochs" : 100,
-    "patience" : 15,
-    "batch_size" : 16,
-    "dataset_ratio" : 0.2,
+    "epochs" : 200,
+    "patience" : 20,
+    "batch_size" : 8,
+    "learning_rate" : 5e-5,
+    "weight_decay" : 1.3e-6,
+    "loss_lambda" : 1.3e-6,
+    "weight_0": 1.0,
+    "weight_1": 1.0,
     "shuffle" : true,
     "accumulation_steps": 4,
     "warmup_epochs": 2
