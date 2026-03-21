@@ -58,26 +58,24 @@ class NodesEmbedding:
         self.kv_size = 768 
 
     def embed_nodes(self, nodes):
-        embeddings = []
-        # We use a simple list here to iterate, but let's keep it clean
         node_items = list(nodes.items())
         
-        for n_id, node in node_items:
-            node_code = node.get_code()
-            # If code is empty, BERT will fail, so we provide a placeholder
-            if not node_code or node_code.strip() == "":
-                node_code = "empty"
-                
-            inputs = self.tokenizer(node_code, return_tensors="pt", truncation=True, padding=True, max_length=128).to(self.device)
-            
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            
-            # Use CLS token (index 0) instead of mean pooling for a slight speedup 
-            # and better semantic representation for single nodes
-            source_embedding = outputs.last_hidden_state[:, 0, :].squeeze().cpu().numpy()
-            
-            embedding = np.concatenate((np.array([node.type]), source_embedding), axis=0)
+        # Batch tokenize all node codes at once
+        node_codes = [node.get_code() or "empty" for _, node in node_items]
+        inputs = self.tokenizer(node_codes, return_tensors="pt", truncation=True, 
+                            padding=True, max_length=128).to(self.device)
+        
+        # Single forward pass for all nodes instead of one per node
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+        # Extract CLS token embeddings for all nodes at once
+        source_embeddings = outputs.last_hidden_state[:, 0, :]  # (num_nodes, 768)
+        
+        # Concatenate with node types
+        embeddings = []
+        for i, (_, node) in enumerate(node_items):
+            embedding = np.concatenate((np.array([node.type]), source_embeddings[i].cpu().numpy()), axis=0)
             embeddings.append(embedding)
         
         return torch.from_numpy(np.array(embeddings)).float()
