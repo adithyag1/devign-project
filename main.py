@@ -82,7 +82,6 @@ def embed_task():
     
     # 2. Pre-instantiate the embedding engines
     nodes_embed_instance = prepare.NodesEmbedding(context.nodes_dim, tokenizer, model, DEVICE)
-    graphs_embed_instance = prepare.GraphsEmbedding(context.edge_type)
 
     for pkl_file in dataset_files:
         file_name = pkl_file.split(".")[0]
@@ -108,8 +107,7 @@ def embed_task():
                 row.nodes, 
                 row.target, 
                 context.nodes_dim, 
-                nodes_embed_instance, 
-                graphs_embed_instance
+                nodes_embed_instance
             )
             inputs.append(graph_data)
             total_ast_edges += graph_data.edge_index_ast.shape[1]

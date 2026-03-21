@@ -88,7 +88,7 @@ class NodesEmbedding:
         return target
 
 
-def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance, graphs_embed_instance):
+def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
     """
     nodes: The dict {id: Node} from parse_to_nodes
     """
