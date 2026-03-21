@@ -38,4 +38,18 @@ def parse_to_nodes(cpg, max_nodes=2000): # Raised limit
         for nid, nobj in all_nodes.items():
             nodes[str(nid)] = nobj
 
+        # 3. Add CFG nodes that are not already present from the AST
+        # Indentation depth 1 matches the depth used for AST child nodes
+        # (Function.indentation=1 is what AST.__init__ receives).
+        for node_data in function.get("CFG", []):
+            nid = str(node_data["id"]).split(".")[-1]
+            if nid not in nodes:
+                nodes[nid] = Node(node_data, 1)
+
+        # 4. Add PDG nodes that are not already present from the AST or CFG
+        for node_data in function.get("PDG", []):
+            nid = str(node_data["id"]).split(".")[-1]
+            if nid not in nodes:
+                nodes[nid] = Node(node_data, 1)
+
     return order_nodes(nodes, max_nodes)
