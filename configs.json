@@ -57,7 +57,7 @@
     "shuffle" : true,
     "accumulation_steps": 8,
     "warmup_epochs": 1
-}
+    },
     "changes": [
         "nodes_dim, emb_size were 205, 101",
         "devign -> model -> gated_graph_conv_args -> out_channels was 200",
