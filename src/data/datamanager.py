@@ -98,25 +98,21 @@ def train_val_test_split(data_frame: pd.DataFrame, shuffle=True):
     return InputDataset(train), InputDataset(test), InputDataset(val)
 
 
-def _compute_split(full_df, test_size=0.2, val_size=0.1, random_state=42):
-    """Compute stratified train/val/test index arrays for a DataFrame."""
-    indices = np.arange(len(full_df))
-    targets = full_df['target'].values
-
-    # Split into (train+val) and test
+def _compute_split_from_targets(targets, test_size=0.2, val_size=0.1, random_state=42):
+    """Compute split using only target array (no full dataframe needed)."""
+    indices = np.arange(len(targets))
+    
     train_val_idx, test_idx = train_test_split(
         indices, test_size=test_size, stratify=targets, random_state=random_state
     )
-
-    # Split (train+val) into train and val
+    
     val_fraction = val_size / (1.0 - test_size)
     train_idx, val_idx = train_test_split(
         train_val_idx, test_size=val_fraction,
         stratify=targets[train_val_idx], random_state=random_state
     )
-
+    
     return train_idx, val_idx, test_idx
-
 
 def global_train_val_test_split(input_dir, split_path, test_size=0.2, val_size=0.1, random_state=42):
     """
@@ -135,13 +131,21 @@ def global_train_val_test_split(input_dir, split_path, test_size=0.2, val_size=0
     if not all_files:
         raise ValueError(f"No input files found in {input_dir}")
 
-    frames = []
+    # loads files incrementally to save RAM
+    n_total = 0
+    all_targets = []
+    all_indices = []
+    current_idx = 0
+    
     for f in all_files:
         df = load(input_dir, f)
-        df = df.reset_index(drop=True)
-        frames.append(df)
-    full_df = pd.concat(frames, ignore_index=True)
-    n_total = len(full_df)
+        n_total += len(df)
+        all_targets.extend(df['target'].values)
+        all_indices.extend([current_idx + i for i in range(len(df))])
+        current_idx += len(df)
+        del df  # Free memory immediately
+    
+    full_targets = np.array(all_targets)
 
     # Load cached split indices or recompute
     if os.path.exists(split_file):
@@ -158,8 +162,8 @@ def global_train_val_test_split(input_dir, split_path, test_size=0.2, val_size=0
                 f"Dataset size changed "
                 f"({split_data.get('total_samples')} → {n_total}), recomputing split..."
             )
-            train_idx, val_idx, test_idx = _compute_split(
-                full_df, test_size, val_size, random_state
+            train_idx, val_idx, test_idx = _compute_split_from_targets(
+                full_targets, test_size, val_size, random_state
             )
             with open(split_file, 'wb') as fh:
                 pickle.dump(
@@ -169,8 +173,8 @@ def global_train_val_test_split(input_dir, split_path, test_size=0.2, val_size=0
                 )
     else:
         print(f"Computing new global split for {n_total} samples...")
-        train_idx, val_idx, test_idx = _compute_split(
-            full_df, test_size, val_size, random_state
+        train_idx, val_idx, test_idx = _compute_split_from_targets(
+            full_targets, test_size, val_size, random_state
         )
         with open(split_file, 'wb') as fh:
             pickle.dump(
