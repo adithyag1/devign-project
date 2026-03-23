@@ -10,7 +10,7 @@ import os
 import torch
 import numpy as np
 
-from cfexplainer.models.cfexplainer import CFExplainer
+from cfexplainer_standalone import StandaloneCFExplainer as CFExplainer
 
 
 class ExplanationExtractor:
