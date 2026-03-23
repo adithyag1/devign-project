@@ -30,7 +30,7 @@ DEVICE = FILES.get_device()
 
 def select(dataset):
     context = configs.Create()
-    project_name = list(context.filter_column_value.values())[0]
+    project_name = context.filter_column_value.get("project")
     result = dataset.loc[dataset['project'] == project_name]
     result = result.loc[result.func.str.len() < 1200]
     vulnerable = result[result['target'] == 1].sample(n=min(len(result[result['target'] == 1]), 2000), random_state=42)

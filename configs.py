@@ -25,7 +25,7 @@ class Create(Config):
 
     @property
     def filter_column_value(self):
-        return self.get_property('filter_project')
+        return self.get_property('filter_column_value')
 
     @property
     def slice_size(self):
