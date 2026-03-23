@@ -16,8 +16,16 @@ class Properties:
 	def code(self):
 		if self.has_code():
 			code = self.pairs["CODE"]
-			if self.has_type() and self.get_type() != "ANY" and self.get_type() not in code:
-				code = f"{self.get_type()} {code}"
+			if not code or code == "<empty>":
+				return None
+			if self.has_type() and self.get_type() != "ANY":
+				type_str = self.get_type()
+				# Normalize pointer spacing (e.g. "char*" vs "char *") before checking
+				# whether the type is already present in the code token.
+				normalized_type = type_str.replace(" *", "*").replace("* ", "*")
+				normalized_code = code.replace(" *", "*").replace("* ", "*")
+				if normalized_type not in normalized_code:
+					code = f"{type_str} {code}"
 			return code
 		return None
 
