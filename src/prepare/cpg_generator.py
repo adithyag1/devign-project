@@ -99,23 +99,54 @@ def joern_create(joern_path, in_path, out_path, cpg_files):
     return json_files
 
 def json_process(in_path, json_file):
+    """
+    Extract ONE function per source file - the REAL function, not synthetic wrappers.
+    
+    Pattern found: Each file has 2 entries:
+    - {file}:<global>  (synthetic, skip this)
+    - actual_function_name (keep this)
+    """
     file_full_path = os.path.join(in_path, json_file)
     if os.path.exists(file_full_path):
         with open(file_full_path) as jf:
             cpg_string = jf.read().strip()
-            if not cpg_string: # Check if file is empty
+            if not cpg_string:
                 print(f"Warning: {json_file} is empty.")
                 return None
             cpg_string = re.sub(r"io\.shiftleft\.codepropertygraph\.generated\.", '', cpg_string)
             try:
                 cpg_json = json.loads(cpg_string)
-                container = [graph_indexing(graph) for graph in cpg_json["functions"] if (graph["file"] != "N/A" and graph["file"]!="<empty>")]
-                return [c for c in container if c[0] is not None]
+                
+                # GROUP functions by source file
+                functions_by_file = {}
+                for graph in cpg_json["functions"]:
+                    if graph["file"] != "N/A" and graph["file"] != "<empty>":
+                        file_path = graph["file"]
+                        file_id = file_path.split(".c")[0].split("/")[-1]
+                        try:
+                            idx = int(file_id)
+                            func_name = graph.get("function", "")
+                            
+                            # SKIP synthetic functions
+                            if "<global>" in func_name or func_name == "START_TEST" or func_name.startswith("<"):
+                                continue
+                            
+                            # Keep ONLY the first real function per file
+                            # (There should be exactly one after filtering)
+                            if idx not in functions_by_file:
+                                functions_by_file[idx] = graph
+                        except:
+                            pass
+                
+                container = [(idx, {"functions": [graph]}) 
+                            for idx, graph in sorted(functions_by_file.items())]
+                
+                return container if container else None
+                
             except json.JSONDecodeError:
                 print(f"Error: Failed to decode JSON in {json_file}")
                 return None
     return None
-
 '''
 def generate(dataset, funcs_path):
     dataset_size = len(dataset)
