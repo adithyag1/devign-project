@@ -51,6 +51,9 @@ class StandaloneCFExplainer:
         self.edge_mask_cfg = None
         self.edge_mask_pdg = None
 
+    def __call__(self, data, target_label=None):
+        return self.forward(data, target_label)
+
     def __set_masks__(self, data):
         """Initialize learnable masks for each graph view."""
         x = data.x
