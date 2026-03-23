@@ -12,6 +12,32 @@ import numpy as np
 
 from cfexplainer_standalone import StandaloneCFExplainer as CFExplainer
 
+# Node label mapping (from src/utils/objects/cpg/node.py)
+NODE_LABELS = {
+    0: "Block",
+    1: "Call",
+    2: "Comment",
+    3: "ControlStructure",
+    4: "File",
+    5: "Identifier",
+    6: "FieldIdentifier",
+    7: "Literal",
+    8: "Local",
+    9: "Member",
+    10: "MetaData",
+    11: "Method",
+    12: "MethodInst",
+    13: "MethodParameterIn",
+    14: "MethodParameterOut",
+    15: "MethodReturn",
+    16: "Namespace",
+    17: "NamespaceBlock",
+    18: "Return",
+    19: "Type",
+    20: "TypeDecl",
+    21: "Unknown",
+}
+
 
 class ExplanationExtractor:
     """
@@ -19,7 +45,7 @@ class ExplanationExtractor:
     vulnerability explanations including actual source code snippets.
     """
 
-    def __init__(self, model, device, epochs=200, top_k=8):
+    def __init__(self, model, device, epochs=200, top_k=5):
         """
         Args:
             model:   Trained TripleViewNet instance.
@@ -125,12 +151,58 @@ class ExplanationExtractor:
         return edge_index[:, idx].cpu().numpy()
 
     @staticmethod
+    def _get_label_name(type_id):
+        """Convert numeric type ID to label name."""
+        if isinstance(type_id, str):
+            try:
+                type_id = int(type_id)
+            except (ValueError, TypeError):
+                return type_id
+        
+        return NODE_LABELS.get(type_id, f"Unknown({type_id})")
+
+    @staticmethod
     def _node_info(node):
-        """Extract code snippet, line number and type label from a Node."""
-        code = node.get_code() or ""
+        """
+        Extract code snippet, line number and type label from a Node.
+        
+        Priority for code extraction:
+        1. CODE property (actual source code)
+        2. TYPE_FULL_NAME property (data type like "char[10]")
+        3. METHOD_FULL_NAME property (for operators and methods)
+        4. Node label (Block, Call, etc.)
+        5. "<no-info>" fallback
+        """
+        # Try to get CODE property
+        code = node.get_code()
+        
+        if not code or code.strip() == "":
+            # Try TYPE_FULL_NAME as fallback
+            node_type = node.properties.get_type()
+            if node_type and node_type.strip() and node_type != "ANY":
+                code = node_type
+        
+        if not code or code.strip() == "":
+            # Try to get METHOD_FULL_NAME (for operators)
+            method_name = node.properties.pairs.get("METHOD_FULL_NAME", "")
+            if method_name and method_name.strip():
+                # Extract just the operator/method name
+                code = method_name.split(".")[-1]
+        
+        if not code or code.strip() == "":
+            # Use node label as fallback
+            label_name = ExplanationExtractor._get_label_name(node.label)
+            code = f"{label_name}"
+        
+        # Final cleanup
+        code = str(code).strip() if code else "<no-info>"
+        if not code:
+            code = "<no-info>"
+        
         line = node.get_line_number()
-        label = node.label if node.label else "Unknown"
-        return {"code": code.strip(), "line": line, "type": label}
+        label = ExplanationExtractor._get_label_name(node.label)
+        
+        return {"code": code, "line": line, "type": label}
 
     def _nodes_to_info(self, indices, node_list):
         """Convert a list of integer node positions to info dicts (deduplicated)."""
@@ -165,8 +237,8 @@ class ExplanationExtractor:
         for rank, (edge_pos, score) in enumerate(zip(idx_np, scores_np)):
             src = int(ei_np[0, edge_pos])
             dst = int(ei_np[1, edge_pos])
-            src_info = self._node_info(node_list[src]) if src < len(node_list) else {"code": "", "line": None, "type": ""}
-            dst_info = self._node_info(node_list[dst]) if dst < len(node_list) else {"code": "", "line": None, "type": ""}
+            src_info = self._node_info(node_list[src]) if src < len(node_list) else {"code": "<no-info>", "line": None, "type": "Unknown"}
+            dst_info = self._node_info(node_list[dst]) if dst < len(node_list) else {"code": "<no-info>", "line": None, "type": "Unknown"}
             paths.append({
                 "from_code": src_info["code"],
                 "from_line": src_info["line"],
@@ -182,7 +254,7 @@ class ExplanationExtractor:
         view_counts = ", ".join(
             f"{v.upper()}:{len(p)}" for v, p in vulnerability_paths.items()
         )
-        key_ops = [n["code"] for n in vulnerable_nodes[:3] if n["code"]]
+        key_ops = [n["code"] for n in vulnerable_nodes[:3] if n["code"] and n["code"] != "<no-info>"]
         ops_str = ", ".join(key_ops) if key_ops else "N/A"
         status = "VULNERABLE" if pred_label == 1 else "CLEAN"
         return (
@@ -196,44 +268,52 @@ class ExplanationExtractor:
 # ------------------------------------------------------------------
 
 def print_explanation_report(func_name, source_file, probability, explanation):
-    """Print a human-readable vulnerability report to stdout."""
+    """Print a concise, elegant vulnerability report to stdout."""
     pred_label = explanation.get("target_label", int(probability > 0.5))
     vulnerable_nodes = explanation["vulnerable_nodes"]
     vulnerability_paths = explanation["vulnerability_paths"]
     summary = explanation["summary"]
 
     width = 80
+    
+    # Filter out noise: only keep nodes with actual code
+    important_nodes = [
+        n for n in vulnerable_nodes 
+        if n["code"] and n["code"] != "<no-info>" and n["line"]
+    ]
+
     print("\n" + "=" * width)
-    print(f"{'VULNERABILITY REPORT WITH EXPLANATION':^{width}}")
+    print(f"{'VULNERABILITY REPORT':^{width}}")
     print("=" * width)
-    print(f"  Target Function : {func_name}")
-    print(f"  Source File     : {os.path.basename(source_file)}")
-    print(f"  Prediction      : {'[!] VULNERABLE' if probability > 0.5 else '[+] CLEAN'}")
-    print(f"  Confidence      : {probability:.2%}")
-    print("-" * width)
+    print(f"Function     : {func_name}")
+    print(f"File         : {os.path.basename(source_file)}")
+    status_text = "[!] VULNERABLE" if probability > 0.5 else "[+] CLEAN"
+    print(f"Prediction   : {status_text} ({probability:.1%})")
+    print("=" * width)
 
-    if vulnerable_nodes:
-        print(f"\n[*] Critical Nodes Identified ({len(vulnerable_nodes)} total):")
-        for i, node in enumerate(vulnerable_nodes, 1):
-            line_str = f"line {node['line']}" if node["line"] is not None else "no line info"
-            print(f"    {i}. [{node['type']}] at {line_str}")
-            if node["code"]:
-                print(f"       Code: {node['code']}")
+    # Show critical code lines
+    if important_nodes:
+        print(f"\n[*] CRITICAL CODE LINES ({len(important_nodes)} identified):\n")
+        for i, node in enumerate(important_nodes[:5], 1):  # Top 5 only
+            line_str = f"Line {node['line']}" if node["line"] is not None else "Unknown"
+            print(f"    {i}. {line_str}: {node['code']}")
 
-    print(f"\n[*] Vulnerability Propagation Paths (3 views):")
-    for view, paths in vulnerability_paths.items():
-        print(f"\n    {view.upper()} Graph ({len(paths)} critical edges):")
-        if not paths:
-            print("      (no edges found)")
-            continue
-        for i, edge in enumerate(paths, 1):
-            from_line = f"line {edge['from_line']}" if edge["from_line"] is not None else "?"
-            to_line   = f"line {edge['to_line']}"   if edge["to_line"]   is not None else "?"
-            print(f"      {i}. {edge['from_code'] or '<no code>'} ({from_line})")
-            print(f"         ↓ [{edge['importance']:.4f}]")
-            print(f"         {edge['to_code'] or '<no code>'} ({to_line})")
+    # Show data flow paths (top 1 per view)
+    print(f"\n[*] VULNERABILITY DATA FLOW:\n")
+    for view in ("ast", "cfg", "pdg"):
+        paths = vulnerability_paths.get(view, [])
+        if paths:
+            top_path = paths[0]  # Only show the most important path
+            from_line = f"Line {top_path['from_line']}" if top_path['from_line'] else "?"
+            to_line = f"Line {top_path['to_line']}" if top_path['to_line'] else "?"
+            importance = top_path['importance']
+            
+            print(f"    {view.upper()} View:")
+            print(f"      {from_line}: {top_path['from_code']}")
+            print(f"               ↓ (score: {importance:.3f})")
+            print(f"      {to_line}: {top_path['to_code']}\n")
 
-    print(f"\n[*] Summary: {summary}")
+    print(f"[*] Summary: {summary}")
     print("=" * width + "\n")
 
 
