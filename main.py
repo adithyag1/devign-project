@@ -33,8 +33,8 @@ def select(dataset):
     project_name = list(context.filter_column_value.values())[0]
     result = dataset.loc[dataset['project'] == project_name]
     result = result.loc[result.func.str.len() < 1200]
-    vulnerable = result[result['target'] == 1].sample(n=min(len(result[result['target'] == 1]), 1000), random_state=42)
-    non_vulnerable = result[result['target'] == 0].sample(n=min(len(result[result['target'] == 0]), 1000), random_state=42)
+    vulnerable = result[result['target'] == 1].sample(n=min(len(result[result['target'] == 1]), 2000), random_state=42)
+    non_vulnerable = result[result['target'] == 0].sample(n=min(len(result[result['target'] == 0]), 2000), random_state=42)
 
     print(f"Selected {len(vulnerable)} vulnerable and {len(non_vulnerable)} non-vulnerable functions.")
     return pd.concat([vulnerable, non_vulnerable]).sample(frac=1)
