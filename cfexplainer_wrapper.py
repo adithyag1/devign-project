@@ -167,17 +167,19 @@ class ExplanationExtractor:
         Extract code snippet, line number and type label from a Node.
         
         Priority for code extraction:
-        1. CODE property (actual source code)
-        2. TYPE_FULL_NAME property (data type like "char[10]")
+        1. Properties.code() – already handles TYPE_FULL_NAME + CODE combination
+        2. TYPE_FULL_NAME only – when no CODE property exists (code() returns None)
         3. METHOD_FULL_NAME property (for operators and methods)
         4. Node label (Block, Call, etc.)
         5. "<no-info>" fallback
         """
-        # Try to get CODE property
+        # Primary: node.get_code() delegates to Properties.code(), which handles
+        # the TYPE_FULL_NAME + CODE combination and returns None when there is
+        # no CODE property (or when CODE is empty / the "<empty>" placeholder).
         code = node.get_code()
-        
-        if not code or code.strip() == "":
-            # Try TYPE_FULL_NAME as fallback
+
+        if code is None:
+            # No CODE property – fall back to TYPE_FULL_NAME
             node_type = node.properties.get_type()
             if node_type and node_type.strip() and node_type != "ANY":
                 code = node_type
