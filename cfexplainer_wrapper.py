@@ -38,6 +38,11 @@ NODE_LABELS = {
     21: "Unknown",
 }
 
+# Node labels that represent metadata rather than executable code.
+# MethodParameterOut / MethodReturn carry only return-type information;
+# Type nodes are pure type declarations.  None of these have meaningful CODE.
+METADATA_NODE_TYPES = {"MethodParameterOut", "MethodReturn", "Type"}
+
 
 class ExplanationExtractor:
     """
@@ -165,55 +170,76 @@ class ExplanationExtractor:
     def _node_info(node):
         """
         Extract code snippet, line number and type label from a Node.
-        
-        Priority for code extraction:
-        1. Properties.code() – already handles TYPE_FULL_NAME + CODE combination
-        2. TYPE_FULL_NAME only – when no CODE property exists (code() returns None)
-        3. METHOD_FULL_NAME property (for operators and methods)
-        4. Node label (Block, Call, etc.)
-        5. "<no-info>" fallback
+
+        Nodes whose label is in METADATA_NODE_TYPES (MethodParameterOut,
+        MethodReturn, Type) carry only type-system metadata – they have no
+        executable CODE and should not appear in vulnerability reports.  Such
+        nodes are returned with code="<no-code>" so callers can filter them.
+
+        Priority for code extraction on non-metadata nodes:
+        1. Properties.code() – handles TYPE_FULL_NAME + CODE combination and
+           returns None when CODE is absent or the "<empty>" placeholder.
+        2. TYPE_FULL_NAME only – when no CODE property exists.
+        3. METHOD_FULL_NAME property (for operators and methods).
+        4. Node label (Block, Call, etc.).
+        5. "<no-info>" fallback.
         """
-        # Primary: node.get_code() delegates to Properties.code(), which handles
-        # the TYPE_FULL_NAME + CODE combination and returns None when there is
-        # no CODE property (or when CODE is empty / the "<empty>" placeholder).
+        label_name = ExplanationExtractor._get_label_name(node.label)
+        line = node.get_line_number()
+
+        # Primary: node.get_code() delegates to Properties.code(), which returns
+        # None when CODE is absent or equals the Joern "<empty>" placeholder.
         code = node.get_code()
+
+        # Metadata-only nodes (return-type / output-parameter / type declarations)
+        # have no executable CODE.  Mark them so they can be filtered downstream.
+        if label_name in METADATA_NODE_TYPES and code is None:
+            return {"code": "<no-code>", "line": line, "type": label_name}
+
+        # Defense-in-depth: strip any residual "<empty>" token that may have
+        # slipped through (e.g. a code string like "<empty> strcpy(buffer, str)").
+        if code and "<empty>" in code:
+            code = code.replace("<empty>", "").strip() or None
 
         if code is None:
             # No CODE property – fall back to TYPE_FULL_NAME
             node_type = node.properties.get_type()
             if node_type and node_type.strip() and node_type != "ANY":
                 code = node_type
-        
+
         if not code or code.strip() == "":
             # Try to get METHOD_FULL_NAME (for operators)
             method_name = node.properties.pairs.get("METHOD_FULL_NAME", "")
             if method_name and method_name.strip():
                 # Extract just the operator/method name
                 code = method_name.split(".")[-1]
-        
+
         if not code or code.strip() == "":
             # Use node label as fallback
-            label_name = ExplanationExtractor._get_label_name(node.label)
             code = f"{label_name}"
-        
+
         # Final cleanup
         code = str(code).strip() if code else "<no-info>"
         if not code:
             code = "<no-info>"
-        
-        line = node.get_line_number()
-        label = ExplanationExtractor._get_label_name(node.label)
-        
-        return {"code": code, "line": line, "type": label}
+
+        return {"code": code, "line": line, "type": label_name}
 
     def _nodes_to_info(self, indices, node_list):
-        """Convert a list of integer node positions to info dicts (deduplicated)."""
+        """Convert a list of integer node positions to info dicts (deduplicated).
+
+        Nodes marked as ``<no-code>`` (metadata-only nodes such as
+        MethodParameterOut, MethodReturn, and Type) are silently dropped so
+        that only entries with actual executable code reach the caller.
+        """
         seen_codes = set()
         result = []
         for i in indices:
             if i >= len(node_list):
                 continue
             info = self._node_info(node_list[i])
+            if info["code"] == "<no-code>":
+                continue
             key = (info["code"], info["line"])
             if key not in seen_codes:
                 seen_codes.add(key)
@@ -281,7 +307,7 @@ def print_explanation_report(func_name, source_file, probability, explanation):
     # Filter out noise: only keep nodes with actual code
     important_nodes = [
         n for n in vulnerable_nodes 
-        if n["code"] and n["code"] != "<no-info>" and n["line"]
+        if n["code"] and n["code"] not in ("<no-info>", "<no-code>") and n["line"]
     ]
 
     print("\n" + "=" * width)
@@ -304,6 +330,12 @@ def print_explanation_report(func_name, source_file, probability, explanation):
     print(f"\n[*] VULNERABILITY DATA FLOW:\n")
     for view in ("ast", "cfg", "pdg"):
         paths = vulnerability_paths.get(view, [])
+        # Skip paths that involve metadata-only nodes
+        paths = [
+            p for p in paths
+            if p["from_code"] not in ("<no-code>", "<no-info>")
+            and p["to_code"] not in ("<no-code>", "<no-info>")
+        ]
         if paths:
             top_path = paths[0]  # Only show the most important path
             from_line = f"Line {top_path['from_line']}" if top_path['from_line'] else "?"
