@@ -151,22 +151,22 @@ class TripleViewNet(nn.Module):
         ).to(device)
 
         # 4-layer classifier with BatchNorm (input: 3 * 128 = 384)
-        self.classifier = nn.Sequential(
-            nn.Linear(3 * hidden_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 1),
-        ).to(device)
-
+    
+    self.classifier = nn.Sequential(
+        nn.Linear(3 * hidden_dim, 512),
+        nn.GroupNorm(8, 512),  # Changed from BatchNorm1d
+        nn.ReLU(),
+        nn.Dropout(0.3),
+        nn.Linear(512, 256),
+        nn.GroupNorm(8, 256),  # Changed from BatchNorm1d
+        nn.ReLU(),
+        nn.Dropout(0.3),
+        nn.Linear(256, 128),
+        nn.GroupNorm(8, 128),  # Changed from BatchNorm1d
+        nn.ReLU(),
+        nn.Dropout(0.2),
+        nn.Linear(128, 1),
+    ).to(device)
     def _encode_view(self, x, edge_index, batch,
                      gnn1, bn1, gnn2, bn2, gnn3, bn3, drop, sag_pool, global_pool):
         """Encode a single graph view with 3-layer GAT + SAGPooling + GlobalAttention."""
