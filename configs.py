@@ -136,6 +136,26 @@ class Process(Config):
     def warmup_epochs(self):
         return self.get_property('warmup_epochs')
 
+    @property
+    def learning_rate(self):
+        return self.get_property('learning_rate')
+
+    @property
+    def weight_decay(self):
+        return self.get_property('weight_decay')
+
+    @property
+    def loss_lambda(self):
+        return self.get_property('loss_lambda')
+
+    @property
+    def weight_0(self):
+        return self.get_property('weight_0')
+
+    @property
+    def weight_1(self):
+        return self.get_property('weight_1')
+
 
 class Devign(Config):
     def __init__(self):
