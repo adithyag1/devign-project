@@ -40,7 +40,9 @@ class Devign(Step):
 
         super().__init__(model=_model,
                          loss_function=weighted_loss,
-                         optimizer=self.optimizer
+                         optimizer=self.optimizer,
+                         w0=weight_0,
+                         w1=weight_1
                          )
 
         # Re-assign after super().__init__() to ensure the passed values are used,
