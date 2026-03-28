@@ -58,7 +58,7 @@ class TripleViewNet(nn.Module):
         h = drop(h)
         return pool(h, batch)
 
-        def forward(self, data):
+    def forward(self, data):
         x = data.x
         batch = data.batch
 
