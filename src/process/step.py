@@ -10,15 +10,14 @@ def binary_accuracy(probs, labels):
     acc = correct / len(labels)
     return acc
 
-devign_config = configs.Devign()
 
 class Step:
-    def __init__(self, model, loss_function, optimizer):
+    def __init__(self, model, loss_function, optimizer, w0=1.0, w1=1.0):
         self.model = model
         self.criterion = loss_function
         self.optimizer = optimizer
-        self.w0 = devign_config.weight_0
-        self.w1 = devign_config.weight_1
+        self.w0 = w0
+        self.w1 = w1
         # Gradient accumulation: update weights every N batches
         self.accumulation_steps = 1
         # Gradient clipping max norm (0 disables clipping)
