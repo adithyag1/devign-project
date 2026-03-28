@@ -101,18 +101,20 @@ class Net(nn.Module):
         
         return self.classifier(x)
 
+
 class TripleViewNet(nn.Module):
     def __init__(self, feature_dim, device):
         super(TripleViewNet, self).__init__()
         self.device = device
-        hidden_dim = 128  # 32 out_channels * 4 heads
+        hidden_dim = 128
+        fusion_dim = 256
 
-        # Input normalization and projection
+        # Input preprocessing
         self.feature_norm = nn.LayerNorm(feature_dim).to(device)
         self.feature_proj = nn.Linear(feature_dim, feature_dim).to(device)
         self.input_dropout = nn.Dropout(0.1).to(device)
 
-        # --- AST branch: 3-layer GAT with residual connections + BatchNorm ---
+        # ─── AST Branch ───
         self.ast_gnn1 = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
         self.ast_bn1 = nn.BatchNorm1d(hidden_dim).to(device)
         self.ast_gnn2 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
@@ -123,7 +125,7 @@ class TripleViewNet(nn.Module):
         self.ast_sag = SAGPooling(hidden_dim, ratio=0.5).to(device)
         self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
-        # --- CFG branch: 3-layer GAT with residual connections + BatchNorm ---
+        # ─── CFG Branch ───
         self.cfg_gnn1 = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
         self.cfg_bn1 = nn.BatchNorm1d(hidden_dim).to(device)
         self.cfg_gnn2 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
@@ -134,7 +136,7 @@ class TripleViewNet(nn.Module):
         self.cfg_sag = SAGPooling(hidden_dim, ratio=0.5).to(device)
         self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
-        # --- PDG branch: 3-layer GAT with residual connections + BatchNorm ---
+        # ─── PDG Branch ───
         self.pdg_gnn1 = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
         self.pdg_bn1 = nn.BatchNorm1d(hidden_dim).to(device)
         self.pdg_gnn2 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
@@ -145,47 +147,56 @@ class TripleViewNet(nn.Module):
         self.pdg_sag = SAGPooling(hidden_dim, ratio=0.5).to(device)
         self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
-        # Multi-head attention cross-view fusion
-        self.cross_attn = nn.MultiheadAttention(
-            embed_dim=hidden_dim, num_heads=4, batch_first=True
+        # ✅ PROPER FUSION: Concat → Project → Self-Attention
+        self.fusion_layer = nn.Sequential(
+            nn.Linear(3 * hidden_dim, fusion_dim),  # [384 → 256]
+            nn.ReLU(),
+            nn.Dropout(0.2),
         ).to(device)
 
-        # 4-layer classifier with BatchNorm (input: 3 * 128 = 384)
-    
-    self.classifier = nn.Sequential(
-        nn.Linear(3 * hidden_dim, 512),
-        nn.GroupNorm(8, 512),  # Changed from BatchNorm1d
-        nn.ReLU(),
-        nn.Dropout(0.3),
-        nn.Linear(512, 256),
-        nn.GroupNorm(8, 256),  # Changed from BatchNorm1d
-        nn.ReLU(),
-        nn.Dropout(0.3),
-        nn.Linear(256, 128),
-        nn.GroupNorm(8, 128),  # Changed from BatchNorm1d
-        nn.ReLU(),
-        nn.Dropout(0.2),
-        nn.Linear(128, 1),
-    ).to(device)
+        # Self-attention for learned view fusion
+        self.fusion_attention = nn.MultiheadAttention(
+            embed_dim=fusion_dim,
+            num_heads=4,
+            batch_first=True,
+            dropout=0.1
+        ).to(device)
+
+        # ✅ PROPER CLASSIFIER: Deep + Normalized
+        self.classifier = nn.Sequential(
+            nn.Linear(fusion_dim, 512),
+            nn.GroupNorm(8, 512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.GroupNorm(8, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 128),
+            nn.GroupNorm(8, 128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 1),
+        ).to(device)
+
     def _encode_view(self, x, edge_index, batch,
                      gnn1, bn1, gnn2, bn2, gnn3, bn3, drop, sag_pool, global_pool):
-        """Encode a single graph view with 3-layer GAT + SAGPooling + GlobalAttention."""
+        """Encode single view with 3-layer GAT + SAGPooling + GlobalAttention."""
         # Layer 1
         h = F.elu(bn1(gnn1(x, edge_index)))
         h = drop(h)
 
-        # Layer 2 with residual connection
+        # Layer 2 with residual
         h = F.elu(bn2(gnn2(h, edge_index)) + 0.5 * h)
 
-        # Layer 3 with residual connection
+        # Layer 3 with residual
         h = F.elu(bn3(gnn3(h, edge_index)) + 0.5 * h)
 
-        # SAGPooling + GlobalAttention hybrid pooling
+        # SAGPooling + GlobalAttention
         try:
             h_pool, edge_idx_pool, _, batch_pool, _, _ = sag_pool(h, edge_index, batch=batch)
             h_graph = global_pool(h_pool, batch_pool)
         except (RuntimeError, ValueError):
-            # Fall back to GlobalAttention only if SAGPooling fails (e.g. too few nodes)
             h_graph = global_pool(h, batch)
 
         return h_graph
@@ -199,7 +210,7 @@ class TripleViewNet(nn.Module):
         x = F.leaky_relu(self.feature_proj(x), 0.01)
         x = self.input_dropout(x)
 
-        # Encode each view independently
+        # Encode each view
         h_ast = self._encode_view(
             x, data.edge_index_ast, batch,
             self.ast_gnn1, self.ast_bn1, self.ast_gnn2, self.ast_bn2,
@@ -216,14 +227,21 @@ class TripleViewNet(nn.Module):
             self.pdg_gnn3, self.pdg_bn3, self.pdg_drop, self.pdg_sag, self.pdg_pool,
         )
 
-        # Cross-view attention fusion: [batch, 3, hidden_dim]
-        views = torch.stack([h_ast, h_cfg, h_pdg], dim=1)
-        attn_out, _ = self.cross_attn(views, views, views)
+        # ✅ STEP 1: Concatenate all views
+        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 384]
 
-        # Flatten fused views: [batch, 3 * hidden_dim]
-        combined = attn_out.reshape(attn_out.size(0), -1)
+        # ✅ STEP 2: Project to fusion space
+        fused = self.fusion_layer(combined)  # [batch, 256]
 
-        return self.classifier(combined).view(-1)
+        # ✅ STEP 3: Self-attention learns which views matter
+        fused_tokens = fused.unsqueeze(1)  # [batch, 1, 256] - single token per graph
+        attn_out, _ = self.fusion_attention(
+            fused_tokens, fused_tokens, fused_tokens
+        )  # [batch, 1, 256]
+        attn_out = attn_out.squeeze(1)  # [batch, 256]
+
+        # ✅ STEP 4: Classify
+        return self.classifier(attn_out).view(-1)
 
     def save(self, path):
         torch.save(self.state_dict(), path)
