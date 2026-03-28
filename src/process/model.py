@@ -50,7 +50,7 @@ class TripleViewNet(nn.Module):
         ).to(device)
         
         # ✅ Temperature scaling (learned during training)
-        self.register_parameter('temperature', nn.Parameter(torch.tensor(1.0, device=device)))
+        self.register_parameter('temperature', nn.Parameter(torch.tensor(0.1, device=device)))
     
     def _encode_view(self, x, edge_index, batch, gnn, norm, drop, pool):
         """Encode a single graph view with one GATConv layer + GlobalAttention pooling."""
