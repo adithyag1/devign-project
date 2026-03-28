@@ -147,11 +147,11 @@ def process_task(use_early_stopping=False, evaluate_only=False):
     model_path = PATHS.model + FILES.model
     model = process.Devign(
         path=model_path, device=DEVICE, model=model_obj,
-        learning_rate=devign_configs.learning_rate,
-        weight_decay=devign_configs.weight_decay,
-        loss_lambda=devign_configs.loss_lambda,
-        weight_0=devign_configs.weight_0,
-        weight_1=devign_configs.weight_1
+        learning_rate=context.learning_rate,
+        weight_decay=context.weight_decay,
+        loss_lambda=context.loss_lambda,
+        weight_0=context.weight_0,
+        weight_1=context.weight_1
     )
     model.accumulation_steps = context.accumulation_steps or 1
 
@@ -193,7 +193,7 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         trainer = process.Train(model, epochs=1, verbose=False)
 
         warmup_epochs = context.warmup_epochs or 0
-        base_lr = devign_configs.learning_rate
+        base_lr = context.learning_rate
 
         early_stopping = None
         if use_early_stopping:
