@@ -8,7 +8,7 @@ torch.manual_seed(2020)
 
 
 class TripleViewNet(nn.Module):
-        def __init__(self, feature_dim, device):
+    def __init__(self, feature_dim, device):
         super(TripleViewNet, self).__init__()
         self.device = device
         hidden_dim = 64
