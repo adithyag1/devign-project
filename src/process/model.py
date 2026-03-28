@@ -8,10 +8,10 @@ torch.manual_seed(2020)
 
 
 class TripleViewNet(nn.Module):
-    def __init__(self, feature_dim, device):
+        def __init__(self, feature_dim, device):
         super(TripleViewNet, self).__init__()
         self.device = device
-        hidden_dim = 64   # GATConv output dim: 2 heads × 32 dims each, concatenated
+        hidden_dim = 64
         fusion_dim = 96
 
         # ─── AST Branch ───
@@ -32,11 +32,11 @@ class TripleViewNet(nn.Module):
         self.pdg_drop = nn.Dropout(0.1).to(device)
         self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
-        # ─── Fusion with BatchNorm ───
-        self.fusion_norm = nn.BatchNorm1d(3 * hidden_dim).to(device)
+        # ─── Fusion with LayerNorm (not BatchNorm - more stable for variable batch sizes) ───
+        self.fusion_norm = nn.LayerNorm(3 * hidden_dim).to(device)
         self.fusion = nn.Sequential(
             nn.Linear(3 * hidden_dim, fusion_dim),
-            nn.BatchNorm1d(fusion_dim),
+            nn.LayerNorm(fusion_dim),
             nn.ReLU(),
             nn.Dropout(0.2),
         ).to(device)
@@ -51,28 +51,14 @@ class TripleViewNet(nn.Module):
         
         # ✅ Temperature scaling (learned during training)
         self.register_parameter('temperature', nn.Parameter(torch.tensor(1.0, device=device)))
-        # ─── Fusion ───
-        self.fusion = nn.Sequential(
-            nn.Linear(3 * hidden_dim, fusion_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-        ).to(device)
-
-        # ─── Classifier ───
-        self.classifier = nn.Sequential(
-            nn.Linear(fusion_dim, 64),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, 1),
-        ).to(device)
-
+    
     def _encode_view(self, x, edge_index, batch, gnn, norm, drop, pool):
         """Encode a single graph view with one GATConv layer + GlobalAttention pooling."""
         h = F.elu(norm(gnn(x, edge_index)))
         h = drop(h)
         return pool(h, batch)
 
-    def forward(self, data):
+        def forward(self, data):
         x = data.x
         batch = data.batch
 
@@ -95,6 +81,7 @@ class TripleViewNet(nn.Module):
         logits = logits / self.temperature.clamp(min=0.1)
         
         return logits
+        
     def save(self, path):
         torch.save(self.state_dict(), path)
 
