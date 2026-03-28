@@ -167,6 +167,21 @@ def process_task(use_early_stopping=False, evaluate_only=False):
     weight_0, weight_1 = data.compute_class_weights(train_df)
     model.update_weights(weight_0, weight_1)
 
+    # --- Model diagnostics ---
+    total_params = sum(p.numel() for p in model_obj.parameters())
+    trainable_params = sum(p.numel() for p in model_obj.parameters() if p.requires_grad)
+    print(f"\n{'='*25} MODEL DIAGNOSTICS {'='*25}")
+    print(f"Total parameters:     {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
+    train_pos = int((train_df['target'] == 1).sum())
+    train_neg = int((train_df['target'] == 0).sum())
+    print(f"Train split: {len(train_df)} samples "
+          f"(Pos={train_pos} [{100*train_pos/len(train_df):.1f}%], "
+          f"Neg={train_neg} [{100*train_neg/len(train_df):.1f}%])")
+    print(f"Val   split: {len(val_df)} samples")
+    print(f"Test  split: {len(test_df)} samples")
+    print(f"{'='*60}\n")
+
     # Build DataLoaders once – PyTorch resets the iterator each epoch automatically
     train_loader = data.InputDataset(train_df).get_loader(context.batch_size, shuffle=context.shuffle)
     val_loader   = data.InputDataset(val_df).get_loader(context.batch_size, shuffle=False)

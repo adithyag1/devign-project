@@ -57,6 +57,12 @@ def predict(step, test_loader_step):
         flat_outs = torch.cat(all_outs, dim=0)
         flat_labels = torch.cat(all_labels, dim=0)
         
+        print(f"  Prediction diagnostics:")
+        print(f"    Mean: {flat_outs.mean():.4f} | Std: {flat_outs.std():.4f} "
+              f"| Min: {flat_outs.min():.4f} | Max: {flat_outs.max():.4f}")
+        print(f"    Class distribution in test — "
+              f"Neg: {(flat_labels == 0).sum().item()} | Pos: {(flat_labels == 1).sum().item()}")
+        
         metrics = Metrics(flat_outs, flat_labels)
         print(metrics)
         metrics.log()

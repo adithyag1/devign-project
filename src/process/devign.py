@@ -28,12 +28,14 @@ class Devign(Step):
         # Define weights and loss logic
         def weighted_loss(o, t):
             t = t.view_as(o)
-            weights = torch.where(t == 0, self.w0, self.w1).to(o.device)
-            return F.binary_cross_entropy_with_logits(o, t, weight=weights) + F.l1_loss(o, t) * self.ll
+            # Per-sample class weighting for better imbalance handling
+            sample_weights = torch.where(t == 0, self.w0, self.w1).to(o.device)
+            bce_loss = F.binary_cross_entropy_with_logits(o, t, reduction='none')
+            return (bce_loss * sample_weights).mean()
 
         self.optimizer = optim.Adam(_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.7, patience=10
+            self.optimizer, mode='min', factor=0.5, patience=5
         )
 
         super().__init__(model=_model,
