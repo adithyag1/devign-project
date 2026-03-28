@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch_geometric.nn.conv import GatedGraphConv
-from torch_geometric.nn import GATConv, GlobalAttention
+from torch_geometric.nn import GATConv, GlobalAttention, SAGPooling
 
 torch.manual_seed(2020)
 
@@ -105,53 +105,126 @@ class TripleViewNet(nn.Module):
     def __init__(self, feature_dim, device):
         super(TripleViewNet, self).__init__()
         self.device = device
+        hidden_dim = 128  # 32 out_channels * 4 heads
 
-        # CHANGE 1: Use a stronger Normalization (LayerNorm often works better than BatchNorm for GNNs)
-        self.feature_norm = nn.LayerNorm(feature_dim).to(device) 
+        # Input normalization and projection
+        self.feature_norm = nn.LayerNorm(feature_dim).to(device)
         self.feature_proj = nn.Linear(feature_dim, feature_dim).to(device)
-        
-        # CHANGE 2: Add a Dropout layer for the input features
-        self.input_dropout = nn.Dropout(0.1).to(device) 
+        self.input_dropout = nn.Dropout(0.1).to(device)
 
-        self.ast_gnn = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
-        self.cfg_gnn = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
-        self.pdg_gnn = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
-        
-        self.pool = GlobalAttention(gate_nn=nn.Linear(128, 1)).to(device)
-        
-        # CHANGE 3: Update Classifier to use LeakyReLU and moderate Dropout
+        # --- AST branch: 3-layer GAT with residual connections + BatchNorm ---
+        self.ast_gnn1 = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.ast_bn1 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.ast_gnn2 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.ast_bn2 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.ast_gnn3 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.ast_bn3 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.ast_drop = nn.Dropout(0.1).to(device)
+        self.ast_sag = SAGPooling(hidden_dim, ratio=0.5).to(device)
+        self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
+
+        # --- CFG branch: 3-layer GAT with residual connections + BatchNorm ---
+        self.cfg_gnn1 = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.cfg_bn1 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.cfg_gnn2 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.cfg_bn2 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.cfg_gnn3 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.cfg_bn3 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.cfg_drop = nn.Dropout(0.1).to(device)
+        self.cfg_sag = SAGPooling(hidden_dim, ratio=0.5).to(device)
+        self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
+
+        # --- PDG branch: 3-layer GAT with residual connections + BatchNorm ---
+        self.pdg_gnn1 = GATConv(feature_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.pdg_bn1 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.pdg_gnn2 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.pdg_bn2 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.pdg_gnn3 = GATConv(hidden_dim, 32, heads=4, add_self_loops=True).to(device)
+        self.pdg_bn3 = nn.BatchNorm1d(hidden_dim).to(device)
+        self.pdg_drop = nn.Dropout(0.1).to(device)
+        self.pdg_sag = SAGPooling(hidden_dim, ratio=0.5).to(device)
+        self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
+
+        # Multi-head attention cross-view fusion
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=4, batch_first=True
+        ).to(device)
+
+        # 4-layer classifier with BatchNorm (input: 3 * 128 = 384)
         self.classifier = nn.Sequential(
-            nn.Linear(384, 128),
-            nn.LeakyReLU(0.01), # Changed from ReLU
-            nn.Dropout(0.2),    # Reduced from 0.4
+            nn.Linear(3 * hidden_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 1),
         ).to(device)
 
+    def _encode_view(self, x, edge_index, batch,
+                     gnn1, bn1, gnn2, bn2, gnn3, bn3, drop, sag_pool, global_pool):
+        """Encode a single graph view with 3-layer GAT + SAGPooling + GlobalAttention."""
+        # Layer 1
+        h = F.elu(bn1(gnn1(x, edge_index)))
+        h = drop(h)
+
+        # Layer 2 with residual connection
+        h = F.elu(bn2(gnn2(h, edge_index)) + 0.5 * h)
+
+        # Layer 3 with residual connection
+        h = F.elu(bn3(gnn3(h, edge_index)) + 0.5 * h)
+
+        # SAGPooling + GlobalAttention hybrid pooling
+        try:
+            h_pool, edge_idx_pool, _, batch_pool, _, _ = sag_pool(h, edge_index, batch=batch)
+            h_graph = global_pool(h_pool, batch_pool)
+        except (RuntimeError, ValueError):
+            # Fall back to GlobalAttention only if SAGPooling fails (e.g. too few nodes)
+            h_graph = global_pool(h, batch)
+
+        return h_graph
+
     def forward(self, data):
         x = data.x
-        
-        # Apply normalization and dropout early
+        batch = data.batch
+
+        # Input preprocessing
         x = self.feature_norm(x)
-        x = self.feature_proj(x)
-        x = F.leaky_relu(x, 0.01) # Use LeakyReLU here too
+        x = F.leaky_relu(self.feature_proj(x), 0.01)
         x = self.input_dropout(x)
 
-        # Branch 1 (AST)
-        h_ast = F.elu(self.ast_gnn(x, data.edge_index_ast))
-        h_ast = self.pool(h_ast, data.batch)
-        
-        # Branch 2 (CFG)
-        h_cfg = F.elu(self.cfg_gnn(x, data.edge_index_cfg))
-        h_cfg = self.pool(h_cfg, data.batch)
-        
-        # Branch 3 (PDG)
-        h_pdg = F.elu(self.pdg_gnn(x, data.edge_index_pdg))
-        h_pdg = self.pool(h_pdg, data.batch)
-        
-        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)
-        
+        # Encode each view independently
+        h_ast = self._encode_view(
+            x, data.edge_index_ast, batch,
+            self.ast_gnn1, self.ast_bn1, self.ast_gnn2, self.ast_bn2,
+            self.ast_gnn3, self.ast_bn3, self.ast_drop, self.ast_sag, self.ast_pool,
+        )
+        h_cfg = self._encode_view(
+            x, data.edge_index_cfg, batch,
+            self.cfg_gnn1, self.cfg_bn1, self.cfg_gnn2, self.cfg_bn2,
+            self.cfg_gnn3, self.cfg_bn3, self.cfg_drop, self.cfg_sag, self.cfg_pool,
+        )
+        h_pdg = self._encode_view(
+            x, data.edge_index_pdg, batch,
+            self.pdg_gnn1, self.pdg_bn1, self.pdg_gnn2, self.pdg_bn2,
+            self.pdg_gnn3, self.pdg_bn3, self.pdg_drop, self.pdg_sag, self.pdg_pool,
+        )
+
+        # Cross-view attention fusion: [batch, 3, hidden_dim]
+        views = torch.stack([h_ast, h_cfg, h_pdg], dim=1)
+        attn_out, _ = self.cross_attn(views, views, views)
+
+        # Flatten fused views: [batch, 3 * hidden_dim]
+        combined = attn_out.reshape(attn_out.size(0), -1)
+
         return self.classifier(combined).view(-1)
-            
+
     def save(self, path):
         torch.save(self.state_dict(), path)
 
