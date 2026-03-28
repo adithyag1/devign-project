@@ -78,7 +78,7 @@ def predict_single_file(c_file_path):
 
     # 5. LOAD MODEL AND RUN INFERENCE
     print("[*] Running Model Inference...")
-    model = TripleViewNet(feature_dim=769, device=DEVICE)
+    model = TripleViewNet(feature_dim=768, device=DEVICE)
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
     model.load_state_dict(checkpoint)
     model.eval()
