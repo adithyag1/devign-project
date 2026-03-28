@@ -32,6 +32,25 @@ class TripleViewNet(nn.Module):
         self.pdg_drop = nn.Dropout(0.1).to(device)
         self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
+        # ─── Fusion with BatchNorm ───
+        self.fusion_norm = nn.BatchNorm1d(3 * hidden_dim).to(device)
+        self.fusion = nn.Sequential(
+            nn.Linear(3 * hidden_dim, fusion_dim),
+            nn.BatchNorm1d(fusion_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+        ).to(device)
+
+        # ─── Classifier ───
+        self.classifier = nn.Sequential(
+            nn.Linear(fusion_dim, 64),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(64, 1),
+        ).to(device)
+        
+        # ✅ Temperature scaling (learned during training)
+        self.register_parameter('temperature', nn.Parameter(torch.tensor(1.0, device=device)))
         # ─── Fusion ───
         self.fusion = nn.Sequential(
             nn.Linear(3 * hidden_dim, fusion_dim),
@@ -65,9 +84,17 @@ class TripleViewNet(nn.Module):
                                   self.pdg_gnn, self.pdg_norm, self.pdg_drop, self.pdg_pool)
 
         combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 192]
+        
+        # ✅ Normalize combined features before fusion
+        combined = self.fusion_norm(combined)
+        
         fused = self.fusion(combined)                         # [batch, 96]
-        return self.classifier(fused).view(-1)               # raw logits
-
+        logits = self.classifier(fused).view(-1)              # raw logits
+        
+        # ✅ Scale by temperature
+        logits = logits / self.temperature.clamp(min=0.1)
+        
+        return logits
     def save(self, path):
         torch.save(self.state_dict(), path)
 
