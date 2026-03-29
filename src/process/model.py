@@ -75,7 +75,12 @@ class TripleViewNet(nn.Module):
 
     def forward(self, data):
         x = data.x
-        batch = data.batch
+        # Handle both batched and single graph cases
+        if hasattr(data, 'batch') and data.batch is not None:
+            batch = data.batch
+        else:
+            # Single graph: create batch tensor (all zeros = same graph)
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=self.device)
 
         h_ast = self._encode_view(x, data.edge_index_ast, batch,
                                   self.ast_gnn, self.ast_norm, self.ast_drop, self.ast_pool)
