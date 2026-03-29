@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import networkx as nx
 from torch_geometric.data import Data
 from tqdm import tqdm
 import torch
@@ -88,6 +89,71 @@ class NodesEmbedding:
         return target
 
 
+def compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_nodes):
+    """Compute 6 graph-level structural features that encode vulnerability patterns.
+
+    Features:
+        density           – how densely connected the graph is
+        avg_degree        – average node connectivity
+        cycle_count       – number of directed cycles (capped at 100)
+        avg_clustering    – average clustering coefficient
+        diameter          – longest shortest path (largest connected component)
+        bridge_count      – number of bridge edges (critical connections)
+
+    Parameters
+    ----------
+    edge_ast, edge_cfg, edge_pdg : list[list[int]]
+        Edge lists in the form [[src, ...], [dst, ...]] for each view.
+    num_nodes : int
+        Total number of nodes in the graph.
+
+    Returns
+    -------
+    np.ndarray of shape (6,) with dtype float32.
+    """
+    if num_nodes == 0:
+        return np.zeros(6, dtype=np.float32)
+
+    G = nx.Graph()
+    G.add_nodes_from(range(num_nodes))
+    DG = nx.DiGraph()
+    DG.add_nodes_from(range(num_nodes))
+
+    for edge_index in [edge_ast, edge_cfg, edge_pdg]:
+        if len(edge_index[0]) > 0:
+            edges = list(zip(edge_index[0], edge_index[1]))
+            G.add_edges_from(edges)
+            DG.add_edges_from(edges)
+
+    if G.number_of_edges() == 0:
+        return np.zeros(6, dtype=np.float32)
+
+    density = nx.density(G)
+    avg_degree = 2 * G.number_of_edges() / max(G.number_of_nodes(), 1)
+
+    # Cap cycle counting to avoid O(n!) computation on large graphs
+    num_cycles = 0
+    for _ in nx.simple_cycles(DG):
+        num_cycles += 1
+        if num_cycles >= 100:
+            break
+
+    avg_clustering = nx.average_clustering(G)
+
+    # Diameter of the largest connected component
+    if nx.is_connected(G):
+        diameter = float(nx.diameter(G))
+    else:
+        largest_cc = max(nx.connected_components(G), key=len)
+        sub = G.subgraph(largest_cc)
+        diameter = float(nx.diameter(sub)) if len(largest_cc) > 1 else 0.0
+
+    bridge_count = float(len(list(nx.bridges(G))))
+
+    return np.array([density, avg_degree, num_cycles, avg_clustering, diameter, bridge_count],
+                    dtype=np.float32)
+
+
 def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
     """
     nodes: The dict {id: Node} from parse_to_nodes
@@ -109,8 +175,18 @@ def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
             return torch.empty((2, 0), dtype=torch.long)
         return torch.tensor(edge_list, dtype=torch.long)
 
+    # Compute node embeddings: (nodes_dim, 769)
+    node_features = nodes_embed_instance(nodes)
+
+    # Compute 6 graph-level structural features and broadcast to all nodes
+    graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, len(nodes))
+    graph_feats_tensor = torch.tensor(graph_feats).float().unsqueeze(0).expand(nodes_dim, -1)
+
+    # Concatenate: (nodes_dim, 775)
+    x = torch.cat([node_features, graph_feats_tensor], dim=1)
+
     return Data(
-        x=nodes_embed_instance(nodes), 
+        x=x,
         edge_index_ast=to_tensor(edge_ast),
         edge_index_cfg=to_tensor(edge_cfg),
         edge_index_pdg=to_tensor(edge_pdg),
