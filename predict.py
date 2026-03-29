@@ -70,11 +70,11 @@ def predict_single_file(c_file_path):
     codebert = AutoModel.from_pretrained("microsoft/codebert-base").to(DEVICE)
 
     nodes_embedder = embeddings.NodesEmbedding(
-        nodes_dim=200, tokenizer=tokenizer, model=codebert, device=DEVICE
+        tokenizer=tokenizer, model=codebert, device=DEVICE
     )
 
     # nodes_to_input returns Data(x, edge_index_ast, edge_index_cfg, edge_index_pdg, y)
-    pyg_data = embeddings.nodes_to_input(nodes, 0, 200, nodes_embedder)
+    pyg_data = embeddings.nodes_to_input(nodes, 0, nodes_embedder)
 
     # 5. LOAD MODEL AND RUN INFERENCE
     print("[*] Running Model Inference...")
