@@ -77,9 +77,15 @@ def embed_task():
     
     # 1. Load CodeBERT once globally for the task
     print("Loading CodeBERT to memory...")
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
-    model = AutoModel.from_pretrained("microsoft/codebert-base").to(DEVICE)
-    model.eval() 
+    import os
+    os.environ['HF_HUB_TIMEOUT'] = '600'
+    os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '600'
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base", trust_remote_code=True)
+    model = AutoModel.from_pretrained("microsoft/codebert-base", trust_remote_code=True).to(DEVICE)
+    model.eval()
+    torch.cuda.empty_cache()
+    gc.collect()
+    print("Memory cleared after loading model")
     
     # 2. Pre-instantiate the embedding engines
     nodes_embed_instance = prepare.NodesEmbedding(context.nodes_dim, tokenizer, model, DEVICE)
