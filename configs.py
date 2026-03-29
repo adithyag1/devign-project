@@ -77,6 +77,22 @@ class Embed(Config):
     @property
     def nodes_dim(self):
         return self.get_property('nodes_dim')
+    
+    @property
+    def feature_dim(self):
+        return self.get_property('feature_dim')
+    
+    @property
+    def codebert_dim(self):
+        return self.get_property('codebert_dim')
+    
+    @property
+    def node_type_dim(self):
+        return self.get_property('node_type_dim')
+    
+    @property
+    def graph_features_dim(self):
+        return self.get_property('graph_features_dim')
 
 
 class Process(Config):
