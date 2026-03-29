@@ -48,15 +48,15 @@
     "process" : {
     "epochs" : 50,
     "patience" : 20,
-    "batch_size" : 16,
-    "learning_rate" : 1e-2,
+    "batch_size" : 32,
+    "learning_rate" : 5e-3,
     "weight_decay" : 1e-5,
     "loss_lambda" : 0,
     "weight_0": 0.8,
     "weight_1": 1.5,
     "shuffle" : true,
-    "accumulation_steps": 4,
-    "warmup_epochs": 5
+    "accumulation_steps": 2,
+    "warmup_epochs": 3
     },
     "changes": [
         "nodes_dim, emb_size were 205, 101",

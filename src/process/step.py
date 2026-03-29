@@ -21,11 +21,14 @@ class Step:
         # Gradient accumulation: update weights every N batches
         self.accumulation_steps = 1
         # Gradient clipping max norm (0 disables clipping)
-        self.clip_grad_norm = 1.0
+        # ✅ Increased from 1.0 (too aggressive) to 5.0
+        self.clip_grad_norm = 5.0
         # Internal counter for accumulation
         self._accum_count = 0
         # Start with clean gradients
         self.optimizer.zero_grad()
+        # Track max gradient norm for debugging
+        self.max_grad_norm = 0
 
     def __call__(self, i, batch_data, y):
         # 1. The model now returns raw LOGITS (no sigmoid)
@@ -54,7 +57,11 @@ class Step:
 
             if self._accum_count % self.accumulation_steps == 0:
                 if self.clip_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
+                    # ✅ clip_grad_norm_ returns the total norm before clipping
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.clip_grad_norm
+                    ).item()
+                    self.max_grad_norm = max(self.max_grad_norm, grad_norm)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
