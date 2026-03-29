@@ -1,5 +1,9 @@
 import torch
-from ..src.data import datamanager as data
+import torch
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.data import datamanager as data
 
 train_df, _, _ = data.global_train_val_test_split("data/input/", "data/")
 
