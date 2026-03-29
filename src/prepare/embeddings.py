@@ -158,6 +158,8 @@ def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
     """
     nodes: The dict {id: Node} from parse_to_nodes
     """
+    num_actual_nodes = len(nodes)  # ACTUAL node count BEFORE padding
+    
     # Create specific engines for each view
     ast_embed = GraphsEmbedding("Ast")
     cfg_embed = GraphsEmbedding("Cfg")
@@ -178,8 +180,11 @@ def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
     # Compute node embeddings: (nodes_dim, 769)
     node_features = nodes_embed_instance(nodes)
 
-    # Compute 6 graph-level structural features and broadcast to all nodes
-    graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, len(nodes))
+    # ✅ Compute 6 graph-level structural features on ACTUAL graph (not padded)
+    graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_actual_nodes)
+    
+    # ✅ Broadcast to ALL nodes (including padded zeros)
+    # This way padded nodes get the graph-level features too
     graph_feats_tensor = torch.tensor(graph_feats).float().unsqueeze(0).expand(nodes_dim, -1)
 
     # Concatenate: (nodes_dim, 775)
