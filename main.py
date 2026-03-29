@@ -147,7 +147,8 @@ def split_task():
 def process_task(use_early_stopping=False, evaluate_only=False):
     context = configs.Process()
     devign_configs = configs.Devign()
-    feature_dim = 775
+    embed_context = configs.Embed()
+    feature_dim = embed_context.feature_dim
 
     model_obj = process.TripleViewNet(feature_dim=feature_dim, device=DEVICE)
     model_path = PATHS.model + FILES.model
