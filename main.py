@@ -97,7 +97,7 @@ def embed_task():
         # 3. Parse CPG to nodes (Structural parsing)
         print(f"Parsing CPG nodes for {file_name}...")
         cpg_dataset["nodes"] = cpg_dataset.apply(
-            lambda row: cpg.parse_to_nodes(row.cpg, context.nodes_dim), axis=1
+            lambda row: cpg.parse_to_nodes(row.cpg, 100000), axis=1 # Large value to not truncate
         )
         cpg_dataset = cpg_dataset.loc[cpg_dataset.nodes.map(len) > 0]
         
