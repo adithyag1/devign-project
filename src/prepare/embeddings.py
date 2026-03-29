@@ -51,8 +51,7 @@ class GraphsEmbedding:
                     
 
 class NodesEmbedding:
-    def __init__(self, nodes_dim, tokenizer, model, device="cpu"):
-        self.nodes_dim = nodes_dim
+    def __init__(self, tokenizer, model, device="cpu"):
         self.tokenizer = tokenizer
         self.model = model
         self.device = device
@@ -66,11 +65,11 @@ class NodesEmbedding:
         inputs = self.tokenizer(node_codes, return_tensors="pt", truncation=True, 
                             padding=True, max_length=128).to(self.device)
         
-        # Single forward pass for all nodes instead of one per node
+        # Single forward pass for all nodes
         with torch.no_grad():
             outputs = self.model(**inputs)
         
-        # Extract CLS token embeddings for all nodes at once
+        # Extract CLS token embeddings
         source_embeddings = outputs.last_hidden_state[:, 0, :]  # (num_nodes, 768)
         
         # Concatenate with node types
@@ -82,12 +81,9 @@ class NodesEmbedding:
         return torch.from_numpy(np.array(embeddings)).float()
 
     def __call__(self, nodes):
-        target = torch.zeros(self.nodes_dim, self.kv_size + 1).float()
-        embedded_nodes = self.embed_nodes(nodes)
-        num_nodes = min(embedded_nodes.size(0), self.nodes_dim)
-        target[:num_nodes, :] = embedded_nodes[:num_nodes, :]
-        return target
-
+        # Return variable-length embeddings (no padding!)
+        # Shape: (num_actual_nodes, 769)
+        return self.embed_nodes(nodes)
 
 def compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_nodes):
     """Compute 6 graph-level structural features that encode vulnerability patterns.
@@ -154,18 +150,21 @@ def compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_nodes):
                     dtype=np.float32)
 
 
-def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
+def nodes_to_input(nodes, target, nodes_embed_instance):
     """
     nodes: The dict {id: Node} from parse_to_nodes
+    
+    Returns variable-length graph with actual node count.
+    Model must handle this via graph pooling.
     """
-    num_actual_nodes = len(nodes)  # ACTUAL node count BEFORE padding
+    num_actual_nodes = len(nodes)
     
     # Create specific engines for each view
     ast_embed = GraphsEmbedding("Ast")
     cfg_embed = GraphsEmbedding("Cfg")
     pdg_embed = GraphsEmbedding("Pdg")
     
-    # Generate the three distinct indices
+    # Generate edges on actual nodes (not padded)
     edge_ast = ast_embed(nodes)
     edge_cfg = cfg_embed(nodes)
     edge_pdg = pdg_embed(nodes)
@@ -177,23 +176,26 @@ def nodes_to_input(nodes, target, nodes_dim, nodes_embed_instance):
             return torch.empty((2, 0), dtype=torch.long)
         return torch.tensor(edge_list, dtype=torch.long)
 
-    # Compute node embeddings: (nodes_dim, 769)
+    # Get variable-length node embeddings (num_actual_nodes, 769)
     node_features = nodes_embed_instance(nodes)
 
-    # ✅ Compute 6 graph-level structural features on ACTUAL graph (not padded)
+    # Compute graph features on actual graph structure
     graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_actual_nodes)
     
-    # ✅ Broadcast to ALL nodes (including padded zeros)
-    # This way padded nodes get the graph-level features too
-    graph_feats_tensor = torch.tensor(graph_feats).float().unsqueeze(0).expand(nodes_dim, -1)
+    # Broadcast graph features to all nodes
+    graph_feats_tensor = torch.tensor(graph_feats).float().unsqueeze(0).expand(num_actual_nodes, -1)
 
-    # Concatenate: (nodes_dim, 775)
+    # Concatenate: (num_actual_nodes, 775) - VARIABLE LENGTH
     x = torch.cat([node_features, graph_feats_tensor], dim=1)
+    
+    # Add batch information for graph pooling
+    batch = torch.zeros(num_actual_nodes, dtype=torch.long)
 
     return Data(
         x=x,
         edge_index_ast=to_tensor(edge_ast),
         edge_index_cfg=to_tensor(edge_cfg),
         edge_index_pdg=to_tensor(edge_pdg),
+        batch=batch,  # All same batch since single graph
         y=label
     )
