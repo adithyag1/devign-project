@@ -77,8 +77,8 @@ def embed_task():
     
     # 1. Load CodeBERT once globally for the task
     print("Loading CodeBERT to memory...")
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/graphcodebert-base")
-    model = AutoModel.from_pretrained("microsoft/graphcodebert-base").to(DEVICE)
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
+    model = AutoModel.from_pretrained("microsoft/codebert-base").to(DEVICE)
     model.eval() 
     
     # 2. Pre-instantiate the embedding engines
