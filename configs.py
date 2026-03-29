@@ -73,10 +73,6 @@ class Files(Data):
 class Embed(Config):
     def __init__(self):
         super().__init__('embed')
-
-    @property
-    def nodes_dim(self):
-        return self.get_property('nodes_dim')
     
     @property
     def feature_dim(self):
