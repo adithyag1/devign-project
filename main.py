@@ -88,8 +88,8 @@ def embed_task():
     print("Memory cleared after loading model")
     
     # 2. Pre-instantiate the embedding engines
-    nodes_embed_instance = prepare.NodesEmbedding(context.nodes_dim, tokenizer, model, DEVICE)
-
+    nodes_embed_instance = prepare.NodesEmbedding(tokenizer, model, DEVICE)
+    
     for pkl_file in dataset_files:
         file_name = pkl_file.split(".")[0]
         cpg_dataset = data.load(PATHS.cpg, pkl_file)
@@ -112,8 +112,7 @@ def embed_task():
         for index, row in tqdm(cpg_dataset.iterrows(), total=len(cpg_dataset), desc="Processing"):
             graph_data = prepare.nodes_to_input(
                 row.nodes, 
-                row.target, 
-                context.nodes_dim, 
+                row.target,  
                 nodes_embed_instance
             )
             inputs.append(graph_data)
