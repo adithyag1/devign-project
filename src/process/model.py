@@ -48,9 +48,24 @@ class TripleViewNet(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(64, 1),
         ).to(device)
-        
-        # ✅ Temperature scaling (learned during training)
-        self.register_parameter('temperature', nn.Parameter(torch.tensor(0.1, device=device)))
+
+        # ✅ Fixed output scaling (not learnable - prevents numerical issues)
+        self.output_scale = 10.0
+
+        # ✅ Initialize all weights properly
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights with Xavier uniform to prevent gradient explosion."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.LayerNorm):
+                nn.init.ones_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
     
     def _encode_view(self, x, edge_index, batch, gnn, norm, drop, pool):
         """Encode a single graph view with one GATConv layer + GlobalAttention pooling."""
@@ -76,10 +91,10 @@ class TripleViewNet(nn.Module):
         
         fused = self.fusion(combined)                         # [batch, 96]
         logits = self.classifier(fused).view(-1)              # raw logits
-        
-        # ✅ Scale by temperature
-        logits = logits / self.temperature.clamp(min=0.1)
-        
+
+        # ✅ Fixed scaling for output magnitude
+        logits = logits * self.output_scale
+
         return logits
         
     def save(self, path):
