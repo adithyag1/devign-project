@@ -18,7 +18,11 @@
         "model": "checkpoint.pt"
     },
     "embed": {
-        "nodes_dim": 150
+        "nodes_dim": 150,
+        "codebert_dim": 768,
+        "node_type_dim": 1,
+        "graph_features_dim": 6,
+        "feature_dim": 775
     },
     "process": {
         "epochs": 50,
