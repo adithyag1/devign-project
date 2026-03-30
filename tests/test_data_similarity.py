@@ -41,6 +41,30 @@ neg_embeddings = np.array(neg_embeddings)
 print(f"Positive - mean embedding: {pos_embeddings.mean():.6f} ± {pos_embeddings.std():.6f}")
 print(f"Negative - mean embedding: {neg_embeddings.mean():.6f} ± {neg_embeddings.std():.6f}")
 
+# Add this to test_data_similarity.py after line 42
+
+print("\n\n=== DETAILED ANALYSIS ===")
+
+# Check JUST CodeBERT embeddings (dims 0-767)
+pos_codebert = pos_embeddings[:, :768]  # Only CodeBERT dims
+neg_codebert = neg_embeddings[:, :768]
+
+pos_codebert_mean = pos_codebert.mean(axis=0)
+neg_codebert_mean = neg_codebert.mean(axis=0)
+codebert_sim = cosine_similarity([pos_codebert_mean], [neg_codebert_mean])[0][0]
+
+print(f"Cosine similarity (CodeBERT only, dims 0-767): {codebert_sim:.4f}")
+
+# Check node types + graph features (dims 768-774)
+pos_other = pos_embeddings[:, 768:]
+neg_other = neg_embeddings[:, 768:]
+
+pos_other_mean = pos_other.mean(axis=0)
+neg_other_mean = neg_other.mean(axis=0)
+other_sim = cosine_similarity([pos_other_mean], [neg_other_mean])[0][0]
+
+print(f"Cosine similarity (node type + graph features, dims 768-774): {other_sim:.4f}")
+
 # Check if there's actual pattern difference
 from sklearn.metrics.pairwise import cosine_similarity
 pos_mean = pos_embeddings.mean(axis=0)
