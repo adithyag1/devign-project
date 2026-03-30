@@ -107,8 +107,8 @@ class NodesEmbedding:
         for _, node in node_items:
             code = node.get_code()
             if not code:
-                # Fallback 1: check raw properties
-                props = node.raw_node.get('properties', {})
+                # Fallback 1: check parsed properties
+                props = node.properties.get() # This returns a proper dict!
                 code = props.get('CODE') or props.get('code') or props.get('NAME') or props.get('name')
 
             if not code:
