@@ -87,8 +87,8 @@ def embed_task():
     gc.collect()
     print("Memory cleared after loading model")
     
-    # 2. Pre-instantiate the embedding engine (function-level)
-    func_embed_instance = prepare.FunctionEmbedding(tokenizer, model, DEVICE)
+    # 2. Pre-instantiate the embedding engine (node-level)
+    node_embed_instance = prepare.NodesEmbedding(tokenizer, model, DEVICE)
     
     for pkl_file in dataset_files:
         file_name = pkl_file.split(".")[0]
@@ -113,8 +113,7 @@ def embed_task():
             graph_data = prepare.nodes_to_input(
                 row.nodes,
                 row.target,
-                func_embed_instance,
-                func_code=row.func,
+                node_embed_instance,
             )
             inputs.append(graph_data)
             total_ast_edges += graph_data.edge_index_ast.shape[1]

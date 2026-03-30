@@ -72,9 +72,10 @@ class TripleViewNet(nn.Module):
     
     def _encode_view(self, x, edge_index, batch, gnn1, gnn2, gnn3, norm, drop, pool):
         """Encode a single graph view with three GATConv layers + GlobalAttention pooling."""
-        h = F.elu(gnn1(x, edge_index))
-        h = F.elu(gnn2(h, edge_index))
-        h = F.elu(gnn3(h, edge_index))
+        h1 = F.elu(gnn1(x, edge_index))
+        h2 = F.elu(gnn2(h1, edge_index))
+        h3 = F.elu(gnn3(h2, edge_index))
+        h = h1 + h3  # Skip connection to prevent over-smoothing
         h = norm(h)
         h = drop(h)
         return pool(h, batch)
