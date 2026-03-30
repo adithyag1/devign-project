@@ -14,20 +14,26 @@ class TripleViewNet(nn.Module):
         hidden_dim = 64
         fusion_dim = 96
 
-        # ─── AST Branch ───
-        self.ast_gnn = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
+        # ─── AST Branch (3 Layers) ───
+        self.ast_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
+        self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
+        self.ast_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
         self.ast_norm = nn.LayerNorm(hidden_dim).to(device)
         self.ast_drop = nn.Dropout(0.1).to(device)
         self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
-        # ─── CFG Branch ───
-        self.cfg_gnn = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
+        # ─── CFG Branch (3 Layers) ───
+        self.cfg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
+        self.cfg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
+        self.cfg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
         self.cfg_norm = nn.LayerNorm(hidden_dim).to(device)
         self.cfg_drop = nn.Dropout(0.1).to(device)
         self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
 
-        # ─── PDG Branch ───
-        self.pdg_gnn = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
+        # ─── PDG Branch (3 Layers) ───
+        self.pdg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
+        self.pdg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
+        self.pdg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
         self.pdg_norm = nn.LayerNorm(hidden_dim).to(device)
         self.pdg_drop = nn.Dropout(0.1).to(device)
         self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
@@ -49,9 +55,6 @@ class TripleViewNet(nn.Module):
             nn.Linear(64, 1),
         ).to(device)
 
-        # ✅ Fixed output scaling (not learnable - prevents numerical issues)
-        self.output_scale = 10.0
-
         # ✅ Initialize all weights properly
         self._init_weights()
 
@@ -67,9 +70,12 @@ class TripleViewNet(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
     
-    def _encode_view(self, x, edge_index, batch, gnn, norm, drop, pool):
-        """Encode a single graph view with one GATConv layer + GlobalAttention pooling."""
-        h = F.elu(norm(gnn(x, edge_index)))
+    def _encode_view(self, x, edge_index, batch, gnn1, gnn2, gnn3, norm, drop, pool):
+        """Encode a single graph view with three GATConv layers + GlobalAttention pooling."""
+        h = F.elu(gnn1(x, edge_index))
+        h = F.elu(gnn2(h, edge_index))
+        h = F.elu(gnn3(h, edge_index))
+        h = norm(h)
         h = drop(h)
         return pool(h, batch)
 
@@ -83,11 +89,11 @@ class TripleViewNet(nn.Module):
             batch = torch.zeros(x.size(0), dtype=torch.long, device=self.device)
 
         h_ast = self._encode_view(x, data.edge_index_ast, batch,
-                                  self.ast_gnn, self.ast_norm, self.ast_drop, self.ast_pool)
+                                  self.ast_gnn1, self.ast_gnn2, self.ast_gnn3, self.ast_norm, self.ast_drop, self.ast_pool)
         h_cfg = self._encode_view(x, data.edge_index_cfg, batch,
-                                  self.cfg_gnn, self.cfg_norm, self.cfg_drop, self.cfg_pool)
+                                  self.cfg_gnn1, self.cfg_gnn2, self.cfg_gnn3, self.cfg_norm, self.cfg_drop, self.cfg_pool)
         h_pdg = self._encode_view(x, data.edge_index_pdg, batch,
-                                  self.pdg_gnn, self.pdg_norm, self.pdg_drop, self.pdg_pool)
+                                  self.pdg_gnn1, self.pdg_gnn2, self.pdg_gnn3, self.pdg_norm, self.pdg_drop, self.pdg_pool)
 
         combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 192]
         
@@ -97,8 +103,7 @@ class TripleViewNet(nn.Module):
         fused = self.fusion(combined)                         # [batch, 96]
         logits = self.classifier(fused).view(-1)              # raw logits
 
-        # ✅ Fixed scaling for output magnitude
-        logits = logits * self.output_scale
+        # Removed the self.output_scale multiplier to prevent gradient vanishing
 
         return logits
         
