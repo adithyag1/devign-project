@@ -19,9 +19,9 @@
     },
     "embed": {
         "codebert_dim": 768,
-        "node_type_dim": 1,
+        "node_type_dim": 70,
         "graph_features_dim": 6,
-        "feature_dim": 775
+        "feature_dim": 844
     },
     "process": {
         "epochs": 50,

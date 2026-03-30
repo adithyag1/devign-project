@@ -25,7 +25,8 @@ def test_weight_updates():
     train_df, val_df, _ = data.global_train_val_test_split("data/input/", "data/")
     
     # Create model
-    model_obj = TripleViewNet(feature_dim=769, device=DEVICE)
+    model_obj = TripleViewNet(feature_dim=844, device=DEVICE)
+    model_obj = model_obj.to(DEVICE)
     
     # Store initial weights
     initial_weights = {name: p.clone().detach() for name, p in model_obj.named_parameters()}
@@ -114,7 +115,8 @@ def test_logit_distribution():
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     train_df, _, _ = data.global_train_val_test_split("data/input/", "data/")
-    model = TripleViewNet(feature_dim=769, device=DEVICE)
+    model = TripleViewNet(feature_dim=844, device=DEVICE)
+    model = model.to(DEVICE)
     model.eval()
     
     logits_list = []
@@ -200,7 +202,8 @@ def test_learning_rate_schedule():
     
     context = configs.Process()
     
-    model_obj = TripleViewNet(feature_dim=769, device=DEVICE)
+    model_obj = TripleViewNet(feature_dim=844, device=DEVICE)
+    model_obj = model_obj.to(DEVICE)
     model = Devign(
         path="test_checkpoint.pt",
         device=DEVICE,

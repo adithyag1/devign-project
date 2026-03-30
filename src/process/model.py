@@ -14,6 +14,9 @@ class TripleViewNet(nn.Module):
         hidden_dim = 64
         fusion_dim = 96
 
+        # ─── Input Normalization ───
+        self.input_norm = nn.BatchNorm1d(feature_dim)
+
         # ─── AST Branch (3 Layers) ───
         self.ast_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
         self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
@@ -82,6 +85,9 @@ class TripleViewNet(nn.Module):
 
     def forward(self, data):
         x = data.x
+        # Normalize inputs to prevent gradient saturation from large graph feature values
+        if x.size(0) > 1:
+            x = self.input_norm(x)
         # Handle both batched and single graph cases
         if hasattr(data, 'batch') and data.batch is not None:
             batch = data.batch

@@ -99,7 +99,8 @@ def test_model_overfit_single_sample():
     pos_data = pos_data.to(DEVICE)
     pos_data.batch = torch.zeros(pos_data.x.shape[0], dtype=torch.long).to(DEVICE)
     
-    model = TripleViewNet(feature_dim=769, device=DEVICE)
+    model = TripleViewNet(feature_dim=844, device=DEVICE)
+    model = model.to(DEVICE)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     
@@ -174,7 +175,8 @@ def test_model_overfit_negative_sample():
     neg_data = neg_data.to(DEVICE)
     neg_data.batch = torch.zeros(neg_data.x.shape[0], dtype=torch.long).to(DEVICE)
     
-    model = TripleViewNet(feature_dim=769, device=DEVICE)
+    model = TripleViewNet(feature_dim=844, device=DEVICE)
+    model = model.to(DEVICE)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     
@@ -232,7 +234,8 @@ def test_batch_predictions():
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_df, _, _ = data.global_train_val_test_split("data/input/", "data/")
     
-    model = TripleViewNet(feature_dim=769, device=DEVICE)
+    model = TripleViewNet(feature_dim=844, device=DEVICE)
+    model = model.to(DEVICE)
     model.eval()
     
     probs_list = []
