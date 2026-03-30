@@ -103,7 +103,19 @@ class NodesEmbedding:
 
     def embed_nodes(self, nodes):
         node_items = list(nodes.items())
-        node_codes = [node.get_code() or "empty" for _, node in node_items]
+        node_codes = []
+        for _, node in node_items:
+            code = node.get_code()
+            if not code:
+                # Fallback 1: check raw properties
+                props = node.raw_node.get('properties', {})
+                code = props.get('CODE') or props.get('code') or props.get('NAME') or props.get('name')
+
+            if not code:
+                # Fallback 2: just use the node label/type
+                code = node.label
+
+            node_codes.append(str(code) if code else "empty")
 
         batch_size = 256
         source_embeddings = []
@@ -237,24 +249,25 @@ def nodes_to_input(nodes, target, node_embed_instance):
 
     # Embed each node's own code snippet individually
     node_features = node_embed_instance(nodes)  # (num_actual_nodes, 769)
+    device = node_features.device  # Ensure we use the device CodeBERT outputted on
 
     # Compute graph features on actual graph structure
     graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_actual_nodes)
 
     # Broadcast graph features to all nodes
-    graph_feats_tensor = torch.tensor(graph_feats).float().unsqueeze(0).expand(num_actual_nodes, -1)
+    graph_feats_tensor = torch.tensor(graph_feats, device=device).float().unsqueeze(0).expand(num_actual_nodes, -1)
 
     # Concatenate: (num_actual_nodes, 775) - VARIABLE LENGTH
     x = torch.cat([node_features, graph_feats_tensor], dim=1)
 
     # Add batch information for graph pooling
-    batch = torch.zeros(num_actual_nodes, dtype=torch.long)
+    batch = torch.zeros(num_actual_nodes, dtype=torch.long, device=device)
 
     return Data(
         x=x,
-        edge_index_ast=to_tensor(edge_ast),
-        edge_index_cfg=to_tensor(edge_cfg),
-        edge_index_pdg=to_tensor(edge_pdg),
-        batch=batch,  # All same batch since single graph
-        y=label
+        edge_index_ast=to_tensor(edge_ast).to(device),
+        edge_index_cfg=to_tensor(edge_cfg).to(device),
+        edge_index_pdg=to_tensor(edge_pdg).to(device),
+        batch=batch,
+        y=label.to(device)
     )
