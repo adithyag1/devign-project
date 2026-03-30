@@ -139,4 +139,4 @@ class Process(Config):
 class Devign(Process):
     """Configuration for the training (Devign) stage."""
     def __init__(self):
-        super().__init__('process')
+        super().__init__()
