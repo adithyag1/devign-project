@@ -103,26 +103,26 @@ class NodesEmbedding:
 
     def embed_nodes(self, nodes):
         node_items = list(nodes.items())
-        
-        # Batch tokenize all node codes at once
         node_codes = [node.get_code() or "empty" for _, node in node_items]
-        inputs = self.tokenizer(node_codes, return_tensors="pt", truncation=True, 
-                            padding=True, max_length=512).to(self.device)
-        
-        # Single forward pass for all nodes
+
+        batch_size = 256
+        source_embeddings = []
+
         with torch.no_grad():
-            outputs = self.model(**inputs)
-        
-        # Extract CLS token embeddings
-        source_embeddings = outputs.last_hidden_state[:, 0, :]  # (num_nodes, 768)
-        
+            for i in range(0, len(node_codes), batch_size):
+                batch_codes = node_codes[i:i+batch_size]
+                inputs = self.tokenizer(batch_codes, return_tensors="pt", truncation=True,
+                                    padding=True, max_length=128).to(self.device)
+                outputs = self.model(**inputs)
+                source_embeddings.append(outputs.last_hidden_state[:, 0, :].cpu().numpy())
+
+        source_embeddings = np.concatenate(source_embeddings, axis=0)  # (num_nodes, 768)
+
         # Concatenate with node types
-        embeddings = []
-        for i, (_, node) in enumerate(node_items):
-            embedding = np.concatenate((np.array([node.type]), source_embeddings[i].cpu().numpy()), axis=0)
-            embeddings.append(embedding)
-        
-        return torch.from_numpy(np.array(embeddings)).float()
+        node_types = np.array([node.type for _, node in node_items], dtype=np.float32).reshape(-1, 1)
+        embeddings = np.concatenate((source_embeddings, node_types), axis=1)
+
+        return torch.from_numpy(embeddings).float()
 
     def __call__(self, nodes):
         # Return variable-length embeddings (no padding!)
@@ -195,7 +195,7 @@ def compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_nodes):
                     dtype=np.float32)
 
 
-def nodes_to_input(nodes, target, func_embed_instance, func_code: str = ""):
+def nodes_to_input(nodes, target, node_embed_instance):
     """Build a PyG Data object for a single function graph.
 
     Parameters
@@ -204,14 +204,10 @@ def nodes_to_input(nodes, target, func_embed_instance, func_code: str = ""):
         The ``{id: Node}`` mapping produced by ``cpg.parse_to_nodes``.
     target : int
         Ground-truth label (1 = vulnerable, 0 = safe).
-    func_embed_instance : FunctionEmbedding
-        Pre-instantiated embedding engine.  The full function code is encoded
-        *once* and the resulting 768-dim vector is broadcast to every node,
-        giving each node complete semantic context rather than truncated
-        per-node snippets.
-    func_code : str, optional
-        Complete source code of the function.  Falls back to an empty string
-        (which the tokenizer maps to "empty") if not supplied.
+    node_embed_instance : NodesEmbedding
+        Pre-instantiated embedding engine.  Each node's own code snippet is
+        encoded individually so that node feature vectors are distinct,
+        enabling the GNN to learn control/data flow patterns.
 
     Returns
     -------
@@ -239,17 +235,8 @@ def nodes_to_input(nodes, target, func_embed_instance, func_code: str = ""):
             return torch.empty((2, 0), dtype=torch.long)
         return torch.tensor(edge_list, dtype=torch.long)
 
-    # Embed the full function once → (768,), then broadcast to all nodes
-    func_embedding = func_embed_instance.embed(func_code)  # (768,)
-    func_embedding_np = func_embedding.cpu().numpy()
-
-    # Build per-node feature rows: [func_embedding (768) | node_type (1)]
-    node_type_list = [node.type for node in nodes.values()]
-    node_types_np = np.array(node_type_list, dtype=np.float32).reshape(-1, 1)  # (N, 1)
-    func_broadcast = np.tile(func_embedding_np, (num_actual_nodes, 1))         # (N, 768)
-    node_features = torch.from_numpy(
-        np.concatenate([func_broadcast, node_types_np], axis=1)                # (N, 769)
-    ).float()
+    # Embed each node's own code snippet individually
+    node_features = node_embed_instance(nodes)  # (num_actual_nodes, 769)
 
     # Compute graph features on actual graph structure
     graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_actual_nodes)
