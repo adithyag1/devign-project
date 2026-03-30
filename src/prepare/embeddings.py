@@ -63,7 +63,7 @@ class NodesEmbedding:
         # Batch tokenize all node codes at once
         node_codes = [node.get_code() or "empty" for _, node in node_items]
         inputs = self.tokenizer(node_codes, return_tensors="pt", truncation=True, 
-                            padding=True, max_length=128).to(self.device)
+                            padding=True, max_length=512).to(self.device)
         
         # Single forward pass for all nodes
         with torch.no_grad():
@@ -84,6 +84,7 @@ class NodesEmbedding:
         # Return variable-length embeddings (no padding!)
         # Shape: (num_actual_nodes, 769)
         return self.embed_nodes(nodes)
+
 
 def compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_nodes):
     """Compute 6 graph-level structural features that encode vulnerability patterns.
