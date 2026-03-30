@@ -22,7 +22,7 @@ class TripleViewNet(nn.Module):
         self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.ast_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.ast_norm = nn.LayerNorm(hidden_dim)
-        self.ast_drop = nn.Dropout(0.1)
+        self.ast_drop = nn.Dropout(0.3)
         self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── CFG Branch (3 Layers) ───
@@ -30,7 +30,7 @@ class TripleViewNet(nn.Module):
         self.cfg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.cfg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.cfg_norm = nn.LayerNorm(hidden_dim)
-        self.cfg_drop = nn.Dropout(0.1)
+        self.cfg_drop = nn.Dropout(0.3)
         self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── PDG Branch (3 Layers) ───
@@ -38,7 +38,7 @@ class TripleViewNet(nn.Module):
         self.pdg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.pdg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.pdg_norm = nn.LayerNorm(hidden_dim)
-        self.pdg_drop = nn.Dropout(0.1)
+        self.pdg_drop = nn.Dropout(0.3)
         self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── Fusion with LayerNorm (not BatchNorm - more stable for variable batch sizes) ───
@@ -47,14 +47,14 @@ class TripleViewNet(nn.Module):
             nn.Linear(3 * hidden_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
         )
 
         # ─── Classifier ───
         self.classifier = nn.Sequential(
             nn.Linear(fusion_dim, 64),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             nn.Linear(64, 1),
         )
 
@@ -114,6 +114,23 @@ class TripleViewNet(nn.Module):
 
         return logits
         
+    def get_optimizer_groups(self, base_weight_decay: float):
+        """Return parameter groups with stronger L2 regularization on classifier layers."""
+        classifier_ids = {id(p) for p in self.classifier.parameters()}
+        classifier_ids |= {id(p) for p in self.fusion.parameters()}
+        gnn_params, head_params = [], []
+        for p in self.parameters():
+            if not p.requires_grad:
+                continue
+            if id(p) in classifier_ids:
+                head_params.append(p)
+            else:
+                gnn_params.append(p)
+        return [
+            {"params": gnn_params, "weight_decay": base_weight_decay},
+            {"params": head_params, "weight_decay": base_weight_decay * 10},
+        ]
+
     def save(self, path):
         torch.save(self.state_dict(), path)
 

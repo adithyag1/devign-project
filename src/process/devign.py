@@ -31,7 +31,8 @@ class Devign(Step):
             bce_loss = F.binary_cross_entropy_with_logits(o, t, reduction='none')
             return (bce_loss * sample_weights).mean()
 
-        self.optimizer = optim.Adam(_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        param_groups = _model.get_optimizer_groups(weight_decay)
+        self.optimizer = optim.Adam(param_groups, lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=5
         )
