@@ -119,7 +119,8 @@ def test_model_forward_pass():
         from src.process.model import TripleViewNet
         
         DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = TripleViewNet(feature_dim=769, device=DEVICE)
+        model = TripleViewNet(feature_dim=844, device=DEVICE)
+        model = model.to(DEVICE)
         
         # Load one batch
         train_df, _, _ = data.global_train_val_test_split("data/input/", "data/")

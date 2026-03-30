@@ -130,15 +130,18 @@ class NodesEmbedding:
 
         source_embeddings = np.concatenate(source_embeddings, axis=0)  # (num_nodes, 768)
 
-        # Concatenate with node types
-        node_types = np.array([node.type for _, node in node_items], dtype=np.float32).reshape(-1, 1)
-        embeddings = np.concatenate((source_embeddings, node_types), axis=1)
+        # One-hot encode node types (70 classes)
+        num_node_types = 70
+        node_types_indices = np.array([node.type for _, node in node_items], dtype=int)
+        node_types_indices = np.clip(node_types_indices, 0, num_node_types - 1)
+        node_types_one_hot = np.eye(num_node_types)[node_types_indices].astype(np.float32)
+        embeddings = np.concatenate((source_embeddings, node_types_one_hot), axis=1)
 
         return torch.from_numpy(embeddings).float()
 
     def __call__(self, nodes):
         # Return variable-length embeddings (no padding!)
-        # Shape: (num_actual_nodes, 769)
+        # Shape: (num_actual_nodes, 838)
         return self.embed_nodes(nodes)
 
 
@@ -224,8 +227,8 @@ def nodes_to_input(nodes, target, node_embed_instance):
     Returns
     -------
     torch_geometric.data.Data
-        Graph with node feature matrix of shape ``(num_nodes, 775)``
-        (768 CodeBERT + 1 node-type + 6 graph features) and three separate
+        Graph with node feature matrix of shape ``(num_nodes, 844)``
+        (768 CodeBERT + 70 node-type one-hot + 6 graph features) and three separate
         edge-index tensors for AST / CFG / PDG views.
     """
     num_actual_nodes = len(nodes)
@@ -248,7 +251,7 @@ def nodes_to_input(nodes, target, node_embed_instance):
         return torch.tensor(edge_list, dtype=torch.long)
 
     # Embed each node's own code snippet individually
-    node_features = node_embed_instance(nodes)  # (num_actual_nodes, 769)
+    node_features = node_embed_instance(nodes)  # (num_actual_nodes, 838)
     device = node_features.device  # Ensure we use the device CodeBERT outputted on
 
     # Compute graph features on actual graph structure
@@ -257,7 +260,7 @@ def nodes_to_input(nodes, target, node_embed_instance):
     # Broadcast graph features to all nodes
     graph_feats_tensor = torch.tensor(graph_feats, device=device).float().unsqueeze(0).expand(num_actual_nodes, -1)
 
-    # Concatenate: (num_actual_nodes, 775) - VARIABLE LENGTH
+    # Concatenate: (num_actual_nodes, 844) - VARIABLE LENGTH
     x = torch.cat([node_features, graph_feats_tensor], dim=1)
 
     # Add batch information for graph pooling

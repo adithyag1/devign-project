@@ -10,7 +10,8 @@ from src.data import datamanager as data
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 train_df, _, _ = data.global_train_val_test_split("data/input/", "data/")
-model = TripleViewNet(feature_dim=769, device=DEVICE)
+model = TripleViewNet(feature_dim=844, device=DEVICE)
+model = model.to(DEVICE)
 
 # Hook to inspect intermediate outputs
 activations = {}
