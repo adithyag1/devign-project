@@ -1,5 +1,6 @@
 import torch
-import torch
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -34,7 +35,6 @@ for idx in range(min(100, len(train_df))):
     else:
         neg_embeddings.append(emb)
 
-import numpy as np
 pos_embeddings = np.array(pos_embeddings)
 neg_embeddings = np.array(neg_embeddings)
 
@@ -66,7 +66,6 @@ other_sim = cosine_similarity([pos_other_mean], [neg_other_mean])[0][0]
 print(f"Cosine similarity (node type + graph features, dims 768-774): {other_sim:.4f}")
 
 # Check if there's actual pattern difference
-from sklearn.metrics.pairwise import cosine_similarity
 pos_mean = pos_embeddings.mean(axis=0)
 neg_mean = neg_embeddings.mean(axis=0)
 similarity = cosine_similarity([pos_mean], [neg_mean])[0][0]
