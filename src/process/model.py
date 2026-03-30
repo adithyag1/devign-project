@@ -15,37 +15,37 @@ class TripleViewNet(nn.Module):
         fusion_dim = 96
 
         # ─── AST Branch (3 Layers) ───
-        self.ast_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
-        self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
-        self.ast_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
-        self.ast_norm = nn.LayerNorm(hidden_dim).to(device)
-        self.ast_drop = nn.Dropout(0.1).to(device)
-        self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
+        self.ast_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
+        self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
+        self.ast_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
+        self.ast_norm = nn.LayerNorm(hidden_dim)
+        self.ast_drop = nn.Dropout(0.1)
+        self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── CFG Branch (3 Layers) ───
-        self.cfg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
-        self.cfg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
-        self.cfg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
-        self.cfg_norm = nn.LayerNorm(hidden_dim).to(device)
-        self.cfg_drop = nn.Dropout(0.1).to(device)
-        self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
+        self.cfg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
+        self.cfg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
+        self.cfg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
+        self.cfg_norm = nn.LayerNorm(hidden_dim)
+        self.cfg_drop = nn.Dropout(0.1)
+        self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── PDG Branch (3 Layers) ───
-        self.pdg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True).to(device)
-        self.pdg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
-        self.pdg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True).to(device)
-        self.pdg_norm = nn.LayerNorm(hidden_dim).to(device)
-        self.pdg_drop = nn.Dropout(0.1).to(device)
-        self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1)).to(device)
+        self.pdg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
+        self.pdg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
+        self.pdg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
+        self.pdg_norm = nn.LayerNorm(hidden_dim)
+        self.pdg_drop = nn.Dropout(0.1)
+        self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── Fusion with LayerNorm (not BatchNorm - more stable for variable batch sizes) ───
-        self.fusion_norm = nn.LayerNorm(3 * hidden_dim).to(device)
+        self.fusion_norm = nn.LayerNorm(3 * hidden_dim)
         self.fusion = nn.Sequential(
             nn.Linear(3 * hidden_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.ReLU(),
             nn.Dropout(0.2),
-        ).to(device)
+        )
 
         # ─── Classifier ───
         self.classifier = nn.Sequential(
@@ -53,7 +53,7 @@ class TripleViewNet(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(64, 1),
-        ).to(device)
+        )
 
         # ✅ Initialize all weights properly
         self._init_weights()
