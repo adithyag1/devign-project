@@ -91,12 +91,6 @@ class Embed(Config):
         return self.get_property('graph_features_dim')
 
 
-class Devign(Process):
-    """Configuration for the training (Devign) stage."""
-    def __init__(self):
-        super().__init__('process')
-
-
 class Process(Config):
     def __init__(self):
         super().__init__('process')
@@ -140,3 +134,9 @@ class Process(Config):
     @property
     def weight_1(self):
         return self.get_property('weight_1')
+
+
+class Devign(Process):
+    """Configuration for the training (Devign) stage."""
+    def __init__(self):
+        super().__init__('process')
