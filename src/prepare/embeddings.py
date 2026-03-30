@@ -3,7 +3,6 @@ import torch
 import networkx as nx
 from torch_geometric.data import Data
 from tqdm import tqdm
-import torch
 
 
 class GraphsEmbedding:
@@ -50,12 +49,57 @@ class GraphsEmbedding:
         return edge_index
                     
 
+class FunctionEmbedding:
+    """Embeds the entire function body as a single vector using CodeBERT.
+
+    Rather than encoding each graph node in isolation (which wastes most of the
+    128/512-token budget on padding for short nodes), this class encodes the
+    *full* function code once at max_length=512, then broadcasts the resulting
+    CLS-token representation to every node in the graph.  This ensures that
+    every node feature vector carries complete semantic context about the
+    surrounding function, which is crucial for identifying vulnerability
+    patterns that only manifest at the function level.
+    """
+
+    def __init__(self, tokenizer, model, device="cpu"):
+        self.tokenizer = tokenizer
+        self.model = model
+        self.device = device
+
+    def embed(self, func_code: str) -> torch.Tensor:
+        """Return the CLS-token embedding for *func_code*.
+
+        Parameters
+        ----------
+        func_code : str or None
+            The full source code of the function to embed.  If ``None`` or an
+            empty string is passed, the tokenizer receives the literal string
+            ``"empty"`` so that the call is always valid.
+
+        Returns
+        -------
+        torch.Tensor of shape (768,)
+        """
+        inputs = self.tokenizer(
+            func_code or "empty",
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=512,
+        ).to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        # CLS token → (768,)
+        return outputs.last_hidden_state[:, 0, :].squeeze(0)
+
+
 class NodesEmbedding:
     def __init__(self, tokenizer, model, device="cpu"):
         self.tokenizer = tokenizer
         self.model = model
         self.device = device
-        self.kv_size = 768 
 
     def embed_nodes(self, nodes):
         node_items = list(nodes.items())
@@ -151,25 +195,43 @@ def compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_nodes):
                     dtype=np.float32)
 
 
-def nodes_to_input(nodes, target, nodes_embed_instance):
-    """
-    nodes: The dict {id: Node} from parse_to_nodes
-    
-    Returns variable-length graph with actual node count.
-    Model must handle this via graph pooling.
+def nodes_to_input(nodes, target, func_embed_instance, func_code: str = ""):
+    """Build a PyG Data object for a single function graph.
+
+    Parameters
+    ----------
+    nodes : dict
+        The ``{id: Node}`` mapping produced by ``cpg.parse_to_nodes``.
+    target : int
+        Ground-truth label (1 = vulnerable, 0 = safe).
+    func_embed_instance : FunctionEmbedding
+        Pre-instantiated embedding engine.  The full function code is encoded
+        *once* and the resulting 768-dim vector is broadcast to every node,
+        giving each node complete semantic context rather than truncated
+        per-node snippets.
+    func_code : str, optional
+        Complete source code of the function.  Falls back to an empty string
+        (which the tokenizer maps to "empty") if not supplied.
+
+    Returns
+    -------
+    torch_geometric.data.Data
+        Graph with node feature matrix of shape ``(num_nodes, 775)``
+        (768 CodeBERT + 1 node-type + 6 graph features) and three separate
+        edge-index tensors for AST / CFG / PDG views.
     """
     num_actual_nodes = len(nodes)
-    
+
     # Create specific engines for each view
     ast_embed = GraphsEmbedding("Ast")
     cfg_embed = GraphsEmbedding("Cfg")
     pdg_embed = GraphsEmbedding("Pdg")
-    
+
     # Generate edges on actual nodes (not padded)
     edge_ast = ast_embed(nodes)
     edge_cfg = cfg_embed(nodes)
     edge_pdg = pdg_embed(nodes)
-    
+
     label = torch.tensor([target]).float()
 
     def to_tensor(edge_list):
@@ -177,18 +239,27 @@ def nodes_to_input(nodes, target, nodes_embed_instance):
             return torch.empty((2, 0), dtype=torch.long)
         return torch.tensor(edge_list, dtype=torch.long)
 
-    # Get variable-length node embeddings (num_actual_nodes, 769)
-    node_features = nodes_embed_instance(nodes)
+    # Embed the full function once → (768,), then broadcast to all nodes
+    func_embedding = func_embed_instance.embed(func_code)  # (768,)
+    func_embedding_np = func_embedding.cpu().numpy()
+
+    # Build per-node feature rows: [func_embedding (768) | node_type (1)]
+    node_type_list = [node.type for node in nodes.values()]
+    node_types_np = np.array(node_type_list, dtype=np.float32).reshape(-1, 1)  # (N, 1)
+    func_broadcast = np.tile(func_embedding_np, (num_actual_nodes, 1))         # (N, 768)
+    node_features = torch.from_numpy(
+        np.concatenate([func_broadcast, node_types_np], axis=1)                # (N, 769)
+    ).float()
 
     # Compute graph features on actual graph structure
     graph_feats = compute_graph_features(edge_ast, edge_cfg, edge_pdg, num_actual_nodes)
-    
+
     # Broadcast graph features to all nodes
     graph_feats_tensor = torch.tensor(graph_feats).float().unsqueeze(0).expand(num_actual_nodes, -1)
 
     # Concatenate: (num_actual_nodes, 775) - VARIABLE LENGTH
     x = torch.cat([node_features, graph_feats_tensor], dim=1)
-    
+
     # Add batch information for graph pooling
     batch = torch.zeros(num_actual_nodes, dtype=torch.long)
 

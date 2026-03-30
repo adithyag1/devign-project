@@ -11,16 +11,14 @@ class Devign(Step):
                  model: object, 
                  learning_rate: float,
                  weight_decay: float,
-                 loss_lambda: float,
                  weight_0: float,
                  weight_1: float):
         self.path = path
         self.lr = learning_rate
         self.wd = weight_decay
-        self.ll = loss_lambda
         self.device = device
         
-        log.log_info('devign', f"LR: {self.lr}; WD: {self.wd}; LL: {self.ll}; W0: {weight_0}; W1: {weight_1}")
+        log.log_info('devign', f"LR: {self.lr}; WD: {self.wd}; W0: {weight_0}; W1: {weight_1}")
         
         # FIX: Define _model by moving the passed model to the device
         _model = model.to(device)
