@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch_geometric.nn import GATConv, GlobalAttention
+from torch_geometric.nn import GATConv, GlobalAttention, global_max_pool
 
 torch.manual_seed(2020)
 
@@ -42,12 +42,12 @@ class TripleViewNet(nn.Module):
         self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
 
         # ─── Fusion with LayerNorm (not BatchNorm - more stable for variable batch sizes) ───
-        self.fusion_norm = nn.LayerNorm(3 * hidden_dim)
+        self.fusion_norm = nn.LayerNorm(6 * hidden_dim)
         self.fusion = nn.Sequential(
-            nn.Linear(3 * hidden_dim, fusion_dim),
+            nn.Linear(6 * hidden_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(0.5), # Increased dropout to 0.5
         )
 
         # ─── Classifier ───
@@ -74,14 +74,19 @@ class TripleViewNet(nn.Module):
                     nn.init.zeros_(module.bias)
     
     def _encode_view(self, x, edge_index, batch, gnn1, gnn2, gnn3, norm, drop, pool):
-        """Encode a single graph view with three GATConv layers + GlobalAttention pooling."""
+        """Encode a single graph view with three GATConv layers + GlobalAttention/Max pooling."""
         h1 = F.elu(gnn1(x, edge_index))
         h2 = F.elu(gnn2(h1, edge_index))
         h3 = F.elu(gnn3(h2, edge_index))
         h = h1 + h3  # Skip connection to prevent over-smoothing
         h = norm(h)
         h = drop(h)
-        return pool(h, batch)
+
+        # Capture BOTH the global context (attention) and the sharpest local signal (max)
+        pool_att = pool(h, batch)
+        pool_max = global_max_pool(h, batch)
+
+        return torch.cat([pool_att, pool_max], dim=1)
 
     def forward(self, data):
         x = data.x
@@ -102,7 +107,7 @@ class TripleViewNet(nn.Module):
         h_pdg = self._encode_view(x, data.edge_index_pdg, batch,
                                   self.pdg_gnn1, self.pdg_gnn2, self.pdg_gnn3, self.pdg_norm, self.pdg_drop, self.pdg_pool)
 
-        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 192]
+        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 384]
         
         # ✅ Normalize combined features before fusion
         combined = self.fusion_norm(combined)
