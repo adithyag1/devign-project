@@ -21,30 +21,34 @@ class TripleViewNet(nn.Module):
         self.ast_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
         self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.ast_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.ast_norm = nn.LayerNorm(hidden_dim)
+        # JK: cat([h1, h2, h3]) = 3 * hidden_dim = 192 (each h_i is 64-dim: 32 channels * 2 heads)
+        self.jk_dim = 3 * hidden_dim
+        jk_dim = self.jk_dim
+        self.ast_norm = nn.LayerNorm(jk_dim)
         self.ast_drop = nn.Dropout(0.3)
-        self.ast_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
+        self.ast_pool = GlobalAttention(gate_nn=nn.Linear(jk_dim, 1))
 
         # ─── CFG Branch (3 Layers) ───
         self.cfg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
         self.cfg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.cfg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.cfg_norm = nn.LayerNorm(hidden_dim)
+        self.cfg_norm = nn.LayerNorm(jk_dim)
         self.cfg_drop = nn.Dropout(0.3)
-        self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
+        self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(jk_dim, 1))
 
         # ─── PDG Branch (3 Layers) ───
         self.pdg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
         self.pdg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
         self.pdg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.pdg_norm = nn.LayerNorm(hidden_dim)
+        self.pdg_norm = nn.LayerNorm(jk_dim)
         self.pdg_drop = nn.Dropout(0.3)
-        self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(hidden_dim, 1))
+        self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(jk_dim, 1))
 
         # ─── Fusion with LayerNorm (not BatchNorm - more stable for variable batch sizes) ───
-        self.fusion_norm = nn.LayerNorm(6 * hidden_dim)
+        # Each view outputs 2 * jk_dim (att pool + max pool); 3 views total = 6 * jk_dim
+        self.fusion_norm = nn.LayerNorm(6 * jk_dim)
         self.fusion = nn.Sequential(
-            nn.Linear(6 * hidden_dim, fusion_dim),
+            nn.Linear(6 * jk_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.ReLU(),
             nn.Dropout(0.5), # Increased dropout to 0.5
@@ -74,11 +78,12 @@ class TripleViewNet(nn.Module):
                     nn.init.zeros_(module.bias)
     
     def _encode_view(self, x, edge_index, batch, gnn1, gnn2, gnn3, norm, drop, pool):
-        """Encode a single graph view with three GATConv layers + GlobalAttention/Max pooling."""
+        """Encode a single graph view with three GATConv layers + JK concat + GlobalAttention/Max pooling."""
         h1 = F.elu(gnn1(x, edge_index))
         h2 = F.elu(gnn2(h1, edge_index))
         h3 = F.elu(gnn3(h2, edge_index))
-        h = h1 + h3  # Skip connection to prevent over-smoothing
+        # Jumping Knowledge: concatenate features from all neighbourhood scales
+        h = torch.cat([h1, h2, h3], dim=-1)
         h = norm(h)
         h = drop(h)
 
@@ -107,7 +112,7 @@ class TripleViewNet(nn.Module):
         h_pdg = self._encode_view(x, data.edge_index_pdg, batch,
                                   self.pdg_gnn1, self.pdg_gnn2, self.pdg_gnn3, self.pdg_norm, self.pdg_drop, self.pdg_pool)
 
-        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 384]
+        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 3 views * 2 pools * jk_dim = 1152]
         
         # ✅ Normalize combined features before fusion
         combined = self.fusion_norm(combined)
