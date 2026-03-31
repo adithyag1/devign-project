@@ -29,15 +29,17 @@ FILES = configs.Files()
 DEVICE = FILES.get_device()
 
 def select(dataset):
-    context = configs.Create()
-    project_name = context.filter_column_value.get("project")
-    result = dataset.loc[dataset['project'] == project_name]
-    result = result.loc[result.func.str.len() < 1200]
-    vulnerable = result[result['target'] == 1].sample(n=min(len(result[result['target'] == 1]), 2000), random_state=42)
-    non_vulnerable = result[result['target'] == 0].sample(n=min(len(result[result['target'] == 0]), 2000), random_state=42)
-
-    print(f"Selected {len(vulnerable)} vulnerable and {len(non_vulnerable)} non-vulnerable functions.")
-    return pd.concat([vulnerable, non_vulnerable]).sample(frac=1)
+    result = dataset.loc[dataset.func.str.len() < 1200]
+    vulnerable = result[result['target'] == 1]
+    non_vulnerable = result[result['target'] == 0]
+    min_count = min(len(vulnerable), len(non_vulnerable))
+    vulnerable_sampled = vulnerable.sample(n=min_count, random_state=42)
+    non_vulnerable_sampled = non_vulnerable.sample(n=min_count, random_state=42)
+    
+    print(f"Total available - Vuln: {len(vulnerable)}, Non-Vuln: {len(non_vulnerable)}")
+    print(f"Selected {len(vulnerable_sampled)} vulnerable and {len(non_vulnerable_sampled)} non-vulnerable functions for a balanced dataset.")
+    
+    return pd.concat([vulnerable_sampled, non_vulnerable_sampled]).sample(frac=1, random_state=42)
 
 def create_task():
     context = configs.Create()
