@@ -98,9 +98,14 @@ def joern_create(joern_path, in_path, out_path, cpg_files):
                 f.write(f'delete\n')
 
             try:
+                # Set Java heap to 10GB for memory-intensive graph exports
+                custom_env = os.environ.copy()
+                custom_env["JAVA_OPTS"] = "-Xmx10g"
+
                 subprocess.run(
                     [joern_bin, "--script", tmp_script_path],
-                    check=True, capture_output=True, text=True
+                    check=True, capture_output=True, text=True,
+                    env=custom_env
                 )
                 
                 # Move the file to data/cpg/ once generated

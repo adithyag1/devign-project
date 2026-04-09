@@ -1,6 +1,6 @@
 {
     "create": {
-        "slice_size": 100,
+        "slice_size": 50,
         "joern_cli_dir": "/home/adithyag1/devign_project/joern/joern-cli/"
     },
     "paths": {

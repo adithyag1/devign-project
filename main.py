@@ -53,6 +53,13 @@ def create_task():
     cpg_files = []
     # Create CPG binary files
     for s, slice in slices:
+        # SKIP if .bin already exists to reuse your 150 minutes of work
+        bin_file_name = f"{s}_{FILES.cpg}.bin"
+        if os.path.exists(os.path.join(PATHS.cpg, bin_file_name)):
+            cpg_files.append(bin_file_name)
+            print(f"Skipping bin creation for dataset {s} - already exists.")
+            continue
+            
         data.to_files(slice, PATHS.joern)
         cpg_file = prepare.joern_parse(context.joern_cli_dir, PATHS.joern, PATHS.cpg, f"{s}_{FILES.cpg}")
         cpg_files.append(cpg_file)
