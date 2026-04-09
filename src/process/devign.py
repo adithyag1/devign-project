@@ -24,13 +24,9 @@ class Devign(Step):
         # FIX: Define _model by moving the passed model to the device
         _model = model.to(device)
         
-        # Define weights and loss logic
+        # Define loss logic — plain BCE without class weighting
         def weighted_loss(o, t):
-            t = t.view_as(o)
-            # Per-sample class weighting for better imbalance handling
-            sample_weights = torch.where(t == 0, self.w0, self.w1).to(o.device)
-            bce_loss = F.binary_cross_entropy_with_logits(o, t, reduction='none')
-            return (bce_loss * sample_weights).mean()
+            return F.binary_cross_entropy_with_logits(o, t.view_as(o))
 
         param_groups = _model.get_optimizer_groups(weight_decay)
         self.optimizer = optim.Adam(param_groups, lr=learning_rate)
