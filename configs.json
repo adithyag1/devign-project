@@ -24,10 +24,10 @@
     },
     "process": {
         "epochs": 100,
-        "batch_size": 32,        
-        "learning_rate": 1e-4,    
+        "batch_size": 16,        
+        "learning_rate": 2e-4,    
         "weight_decay": 0.01,     
-        "accumulation_steps": 2,  
+        "accumulation_steps": 4,  
         "patience": 20,           
         "warmup_epochs": 10        
     }

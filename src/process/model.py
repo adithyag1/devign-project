@@ -12,7 +12,7 @@ class TripleViewNet(nn.Module):
         super(TripleViewNet, self).__init__()
         self.device = device
         hidden_dim = 64
-        fusion_dim = 96
+        fusion_dim = 256
 
         # ─── Input Normalization ───
         self.input_norm = nn.BatchNorm1d(feature_dim)
@@ -77,23 +77,22 @@ class TripleViewNet(nn.Module):
                     nn.init.zeros_(module.bias)
     
     def _encode_view(self, x, edge_index, batch, gnn1, gnn2, gnn3, norm, drop, pool):
-        """Encode a single graph view with three GATConv layers + JK concat + Mixed Pooling."""
+        """Encode with 3 GAT layers + JK + Mixed Max/Mean Pooling."""
         h1 = F.elu(gnn1(x, edge_index))
         h2 = F.elu(gnn2(h1, edge_index))
         h3 = F.elu(gnn3(h2, edge_index))
         
-        # Jumping Knowledge: concatenate features from all scales
+        # Jumping Knowledge: retains info from all layers
         h = torch.cat([h1, h2, h3], dim=-1)
         h = norm(h)
         h = drop(h)
 
-        # ─── IMPROVED POOLING ───
-        # Capture the 'sharpest' signal (Max) and the 'overall' context (Attention)
-        pool_att = pool(h, batch)
-        pool_max = global_max_pool(h, batch)
+        # Mixed Pooling: Max captures sharp bugs, Mean captures overall context
+        from torch_geometric.nn import global_mean_pool
+        p_max = global_max_pool(h, batch)
+        p_mean = global_mean_pool(h, batch)
 
-        # Concatenate both poolings (Total dim = 2 * jk_dim)
-        return torch.cat([pool_att, pool_max], dim=1)
+        return torch.cat([p_max, p_mean], dim=1)
 
     def forward(self, data):
         x = data.x
