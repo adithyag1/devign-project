@@ -39,11 +39,31 @@ def graph_indexing(graph):
 
 def joern_parse(joern_path, input_path, output_path, file_name):
     out_file = file_name + ".bin"
-    joern_parse_call = subprocess.run(["./" + joern_path + "joern-parse", input_path, "--output", output_path + out_file],
-                                      stdout=subprocess.PIPE, text=True, check=True)
-    print(str(joern_parse_call))
+    
+    # 1. ENSURE THE DIRECTORY EXISTS
+    # This was the cause of your "nio:/.../data/cpg" error
+    if not os.path.exists(output_path):
+        os.makedirs(output_path, exist_ok=True)
+    
+    abs_input = os.path.abspath(input_path)
+    abs_output = os.path.abspath(os.path.join(output_path, out_file))
+    executable = os.path.join(joern_path, "joern-parse")
+    
+    joern_parse_call = subprocess.run(
+        [executable, abs_input, "--output", abs_output], 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=joern_path
+    )
+    
+    if joern_parse_call.returncode != 0:
+        print("\n" + "!"*20 + " JOERN PARSE ERROR " + "!"*20)
+        print(f"Stdout: {joern_parse_call.stdout}")
+        print(f"Stderr: {joern_parse_call.stderr}")
+        joern_parse_call.check_returncode()
+        
     return out_file
-
 
 def joern_create(joern_path, in_path, out_path, cpg_files):
     json_files = []

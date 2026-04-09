@@ -1,4 +1,5 @@
 backup/*
+data/joern/*
 data/input/*
 data/tokens/*
 data/model/*

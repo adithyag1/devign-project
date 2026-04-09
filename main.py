@@ -29,7 +29,7 @@ FILES = configs.Files()
 DEVICE = FILES.get_device()
 
 def select(dataset):
-    result = dataset.loc[dataset.func.str.len() < 1200]
+    result = dataset.loc[dataset.func.str.len() < 5000]
     vulnerable = result[result['target'] == 1]
     non_vulnerable = result[result['target'] == 0]
     min_count = min(len(vulnerable), len(non_vulnerable))
