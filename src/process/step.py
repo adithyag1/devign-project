@@ -33,12 +33,8 @@ class Step:
         # We need this because stats.Stat and binary_accuracy expect 0.0 to 1.0
         probs = torch.sigmoid(logits)
         
-        # 3. Weighted Loss Logic using the Logit-stable function
-        loss_weights = torch.where(target == 0, self.w0, self.w1).to(target.device)
-        
-        # Use binary_cross_entropy_with_logits for numerical stability
-        raw_loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, target, reduction='none')
-        loss = (raw_loss * loss_weights).mean()
+        # 3. Compute loss directly without per-sample class weighting
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, target)
         
         # 4. Accuracy and Optimizer
         acc = binary_accuracy(probs, target)

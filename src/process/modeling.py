@@ -1,6 +1,7 @@
 from ..utils.objects.metrics import Metrics
 import torch
 import time
+import numpy as np
 from ..utils import log as logger
 
 class Train(object):
@@ -34,7 +35,42 @@ class Train(object):
                     return True
         return False
 
-def predict(step, test_loader_step):
+
+def _collect_probs_labels(step, loader_step):
+    """Collect probabilities and labels from a LoaderStep without modifying state."""
+    all_outs = []
+    all_labels = []
+    device = getattr(step, 'device', 'cpu')
+    with torch.no_grad():
+        step.model.eval()
+        for batch in loader_step.loader:
+            data_input = batch[0] if isinstance(batch, (tuple, list)) else batch
+            if hasattr(data_input, 'x'):
+                data_input = data_input.to(device)
+                output = torch.sigmoid(step.model(data_input))
+                all_outs.append(output.detach().cpu())
+                all_labels.append(data_input.y.detach().cpu())
+    if not all_outs:
+        return torch.tensor([]), torch.tensor([])
+    return torch.cat(all_outs, dim=0), torch.cat(all_labels, dim=0)
+
+
+def _find_best_threshold(probs, labels):
+    """Find threshold maximizing accuracy over a grid from 0.05 to 0.95 (step 0.01)."""
+    probs_np = probs.numpy() if hasattr(probs, 'numpy') else np.array(probs)
+    labels_np = labels.numpy() if hasattr(labels, 'numpy') else np.array(labels)
+    best_threshold = 0.5
+    best_acc = 0.0
+    for t in np.linspace(0.05, 0.95, 91):
+        preds = (probs_np >= t).astype(int)
+        acc = (preds == labels_np).mean()
+        if acc > best_acc:
+            best_acc = acc
+            best_threshold = float(t)
+    return best_threshold, float(best_acc)
+
+
+def predict(step, test_loader_step, val_loader_step=None, threshold=0.5):
     print(f"Testing")
     with torch.no_grad():
         step.model.eval()
@@ -62,8 +98,14 @@ def predict(step, test_loader_step):
               f"| Min: {flat_outs.min():.4f} | Max: {flat_outs.max():.4f}")
         print(f"    Class distribution in test — "
               f"Neg: {(flat_labels == 0).sum().item()} | Pos: {(flat_labels == 1).sum().item()}")
-        
-        metrics = Metrics(flat_outs, flat_labels)
+
+        if val_loader_step is not None:
+            val_probs, val_labels = _collect_probs_labels(step, val_loader_step)
+            if len(val_probs) > 0:
+                threshold, val_acc = _find_best_threshold(val_probs, val_labels)
+                print(f"  Threshold tuning: selected threshold={threshold:.2f}, val accuracy={val_acc:.4f}")
+
+        metrics = Metrics(flat_outs, flat_labels, threshold=threshold)
         print(metrics)
         metrics.log()
         

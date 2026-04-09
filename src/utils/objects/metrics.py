@@ -6,15 +6,16 @@ from sklearn import metrics
 
 
 class Metrics:
-    def __init__(self, outs, labels):
+    def __init__(self, outs, labels, threshold=0.5):
         self.scores = outs
         self.labels = labels
+        self.threshold = threshold
         self.transform()
         print(self.predicts)
 
     def transform(self):
         self.series = pd.Series(self.scores)
-        self.predicts = self.series.apply(lambda x: 1 if x >= 0.5 else 0)
+        self.predicts = self.series.apply(lambda x: 1 if x >= self.threshold else 0)
         self.predicts.reset_index(drop=True, inplace=True)
 
     def __str__(self):
