@@ -169,7 +169,19 @@ def process_task(use_early_stopping=False, evaluate_only=False):
     # exact same disjoint subsets.
     print("Loading global train/val/test split...")
     train_df, val_df, test_df = data.global_train_val_test_split(PATHS.input, "data/")
-
+    
+    # Recover original indices to map projects
+    print("Recovering project labels...")
+    raw_df = data.read(PATHS.raw, FILES.raw)
+    
+    import pickle
+    with open("data/split_indices.pkl", 'rb') as f:
+        indices = pickle.load(f)
+    
+    # Map the test indices back to project names in the raw data
+    test_indices = indices['test']
+    test_df['project'] = raw_df.iloc[test_indices]['project'].values
+    
     # Compute class weights from the training set only
     weight_0, weight_1 = data.compute_class_weights(train_df)
     model.update_weights(weight_0, weight_1)
@@ -246,10 +258,14 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         model.load()
 
     # ── Final evaluation on the held-out test set ────────────────────────────
-    print("\n" + "=" * 25 + " FINAL EVALUATION " + "=" * 25)
-    print(f"Test Samples: {len(test_df)}")
-    final_test_step = process.LoaderStep("Final Test", test_loader, DEVICE)
-    process.predict(model, final_test_step)
+    print("\n" + "=" * 25 + " PROJECT-SPECIFIC EVALUATION " + "=" * 25)
+    for p_name in ['qemu', 'ffmpeg']:
+        p_test = test_df[test_df['project'] == p_name]
+        if not p_test.empty:
+            print(f"\n[PROJECT: {p_name.upper()}] Samples: {len(p_test)}")
+            p_loader = data.InputDataset(p_test).get_loader(context.batch_size, shuffle=False)
+            p_step = process.LoaderStep(f"{p_name} Test", p_loader, DEVICE)
+            process.predict(model, p_step)
         
 def main():
     """
