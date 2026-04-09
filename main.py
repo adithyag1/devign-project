@@ -172,15 +172,20 @@ def process_task(use_early_stopping=False, evaluate_only=False):
     
     # Recover original indices to map projects
     print("Recovering project labels...")
-    raw_df = data.read(PATHS.raw, FILES.raw)
+    raw_df = data.read(PATHS.raw, FILES.raw) # This must be the full dataset.json
     
     import pickle
     with open("data/split_indices.pkl", 'rb') as f:
         indices = pickle.load(f)
     
-    # Map the test indices back to project names in the raw data
     test_indices = indices['test']
+    
+    # CRITICAL: Use the original Index column if it exists, otherwise iloc
+    # We use 'values' to ensure alignment with the reset_index test_df
     test_df['project'] = raw_df.iloc[test_indices]['project'].values
+
+    # DEBUG PRINT: Check what is actually in the project column
+    print(f"Project counts in Test Set:\n{test_df['project'].value_counts(dropna=False)}")
     
     # Compute class weights from the training set only
     weight_0, weight_1 = data.compute_class_weights(train_df)
@@ -259,13 +264,19 @@ def process_task(use_early_stopping=False, evaluate_only=False):
 
     # ── Final evaluation on the held-out test set ────────────────────────────
     print("\n" + "=" * 25 + " PROJECT-SPECIFIC EVALUATION " + "=" * 25)
-    for p_name in ['qemu', 'ffmpeg']:
-        p_test = test_df[test_df['project'] == p_name]
-        if not p_test.empty:
-            print(f"\n[PROJECT: {p_name.upper()}] Samples: {len(p_test)}")
-            p_loader = data.InputDataset(p_test).get_loader(context.batch_size, shuffle=False)
-            p_step = process.LoaderStep(f"{p_name} Test", p_loader, DEVICE)
-            process.predict(model, p_step)
+    # Use the actual unique values found in the mapping to avoid missing anything
+    for p_name in test_df['project'].unique():
+        if pd.isna(p_name):
+            p_test = test_df[test_df['project'].isna()]
+            p_label = "UNKNOWN/UNMAPPED"
+        else:
+            p_test = test_df[test_df['project'] == p_name]
+            p_label = p_name.upper()
+
+        print(f"\n[PROJECT: {p_label}] Samples: {len(p_test)}")
+        p_loader = data.InputDataset(p_test).get_loader(context.batch_size, shuffle=False)
+        p_step = process.LoaderStep(f"{p_name} Test", p_loader, DEVICE)
+        process.predict(model, p_step)
         
 def main():
     """
