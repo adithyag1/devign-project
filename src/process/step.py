@@ -25,18 +25,18 @@ class Step:
         self.max_grad_norm = 0
 
     def __call__(self, i, batch_data, y):
-        # 1. The model now returns raw LOGITS (no sigmoid)
         logits = self.model(batch_data).view(-1)
         target = y.float()
-        
-        # 2. Convert logits to probabilities for stats/accuracy
-        # We need this because stats.Stat and binary_accuracy expect 0.0 to 1.0
+
+        # label smoothing
+        smooth = 0.05
+        target_smoothed = target * (1.0 - smooth) + 0.5 * smooth
+
         probs = torch.sigmoid(logits)
-        
-        # 3. Compute loss directly without per-sample class weighting
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, target)
-        
-        # 4. Accuracy and Optimizer
+
+        # plain BCE-with-logits (no class-weight scaling)
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, target_smoothed)
+
         acc = binary_accuracy(probs, target)
 
         if self.model.training:

@@ -2,41 +2,37 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv, global_max_pool, global_mean_pool
+from torch_geometric.utils import dropout_edge
 
 class TripleViewNet(nn.Module):
     def __init__(self, feature_dim, device):
         super(TripleViewNet, self).__init__()
         self.device = device
 
-        # 1. Input Normalization
         self.input_norm = nn.BatchNorm1d(feature_dim)
 
-        # 2. 3-Layer GAT Branches (2 heads each), dropout=0.2 in each GATConv
         def make_gat_branch():
             return nn.ModuleList([
-                GATConv(feature_dim, 32, heads=2, dropout=0.2, add_self_loops=True),
-                GATConv(64, 32, heads=2, dropout=0.2, add_self_loops=True),
-                GATConv(64, 32, heads=2, dropout=0.2, add_self_loops=True)
+                GATConv(feature_dim, 32, heads=2, add_self_loops=True, dropout=0.2),  # 64
+                GATConv(64, 32, heads=2, add_self_loops=True, dropout=0.2),           # 64
+                GATConv(64, 32, heads=2, add_self_loops=True, dropout=0.2),           # 64
             ])
 
         self.ast_branch = make_gat_branch()
         self.cfg_branch = make_gat_branch()
         self.pdg_branch = make_gat_branch()
 
-        # 3. Jumping Knowledge & View Normalization
-        # JK concatenates 3 layers of 64-dim = 192-dim
+        # JK: 64*3 = 192
         self.jk_norm = nn.LayerNorm(192)
         self.jk_drop = nn.Dropout(0.3)
 
-        # 4. Per-view projection after dual pooling (max+mean => 384 -> 128)
+        # pooled view = max(192)+mean(192)=384
         self.view_proj = nn.Sequential(
             nn.Linear(384, 128),
             nn.ReLU(),
             nn.Dropout(0.2)
         )
 
-        # 5. Gated Attention Fusion
-        # Learns which view (AST, CFG, PDG) is most important for a given sample
         self.gate = nn.Sequential(
             nn.Linear(128, 64),
             nn.ReLU(),
@@ -44,7 +40,6 @@ class TripleViewNet(nn.Module):
             nn.Softmax(dim=-1)
         )
 
-        # 6. Final Deep Classifier
         self.classifier = nn.Sequential(
             nn.Linear(128, 128),
             nn.ReLU(),
@@ -56,52 +51,46 @@ class TripleViewNet(nn.Module):
         )
 
     def _encode_view(self, x, edge_index, batch, branch):
-        """Encode with 3 GAT layers + Jumping Knowledge (JK) + Dual Global Pooling."""
         h1 = F.elu(branch[0](x, edge_index))
         h2 = F.elu(branch[1](h1, edge_index))
         h3 = F.elu(branch[2](h2, edge_index))
 
-        # Jumping Knowledge (JK): Concatenate features from all layers
-        h_combined = torch.cat([h1, h2, h3], dim=-1)  # [Nodes, 192]
-        h_combined = self.jk_norm(h_combined)
-        h_combined = self.jk_drop(h_combined)
+        h = torch.cat([h1, h2, h3], dim=-1)   # [N, 192]  (JK)
+        h = self.jk_norm(h)
+        h = self.jk_drop(h)
 
-        # Dual Pooling: concatenate max and mean for richer graph representation
-        h_max = global_max_pool(h_combined, batch)   # [Batch, 192]
-        h_mean = global_mean_pool(h_combined, batch)  # [Batch, 192]
-        return torch.cat([h_max, h_mean], dim=-1)     # [Batch, 384]
+        h_max = global_max_pool(h, batch)     # [B, 192]
+        h_mean = global_mean_pool(h, batch)   # [B, 192]
+        return torch.cat([h_max, h_mean], dim=-1)  # [B, 384]
 
     def forward(self, data):
         x = data.x
         if x.size(0) > 1:
             x = self.input_norm(x)
 
-        batch = data.batch if hasattr(data, 'batch') and data.batch is not None else \
-                torch.zeros(x.size(0), dtype=torch.long, device=self.device)
+        batch = data.batch if hasattr(data, 'batch') and data.batch is not None \
+            else torch.zeros(x.size(0), dtype=torch.long, device=self.device)
 
-        # Step 1: Encode 3 Views (AST, CFG, PDG) using 3-layer GATs + JK + dual pool
-        h_ast = self._encode_view(x, data.edge_index_ast, batch, self.ast_branch)
-        h_cfg = self._encode_view(x, data.edge_index_cfg, batch, self.cfg_branch)
-        h_pdg = self._encode_view(x, data.edge_index_pdg, batch, self.pdg_branch)
+        # edge dropout regularization (train only)
+        edge_ast, _ = dropout_edge(data.edge_index_ast, p=0.10, training=self.training)
+        edge_cfg, _ = dropout_edge(data.edge_index_cfg, p=0.10, training=self.training)
+        edge_pdg, _ = dropout_edge(data.edge_index_pdg, p=0.10, training=self.training)
 
-        # Step 2: Per-view projection (384 -> 128)
-        h_ast = self.view_proj(h_ast)
-        h_cfg = self.view_proj(h_cfg)
-        h_pdg = self.view_proj(h_pdg)
+        h_ast = self._encode_view(x, edge_ast, batch, self.ast_branch)  # [B,384]
+        h_cfg = self._encode_view(x, edge_cfg, batch, self.cfg_branch)  # [B,384]
+        h_pdg = self._encode_view(x, edge_pdg, batch, self.pdg_branch)  # [B,384]
 
-        # Step 3: Gated Fusion
-        # Stack views: [Batch, 3, 128]
-        stacked_views = torch.stack([h_ast, h_cfg, h_pdg], dim=1)
+        h_ast = self.view_proj(h_ast)  # [B,128]
+        h_cfg = self.view_proj(h_cfg)  # [B,128]
+        h_pdg = self.view_proj(h_pdg)  # [B,128]
 
-        # Calculate dynamic weights based on the average projected features
-        avg_features = torch.mean(stacked_views, dim=1)  # [Batch, 128]
-        weights = self.gate(avg_features)                # [Batch, 3]
+        views = torch.stack([h_ast, h_cfg, h_pdg], dim=1)   # [B,3,128]
+        gate_in = (h_ast + h_cfg + h_pdg) / 3.0            # [B,128]
+        alpha = self.gate(gate_in).unsqueeze(-1)           # [B,3,1]
+        fused = (views * alpha).sum(dim=1)                 # [B,128]
 
-        # Weighted sum: [Batch, 1, 3] @ [Batch, 3, 128] -> [Batch, 128]
-        fused = torch.bmm(weights.unsqueeze(1), stacked_views).squeeze(1)
-
-        # Step 4: Classification — return logits shape [B]
-        return self.classifier(fused).view(-1)
+        logits = self.classifier(fused).squeeze(-1)        # [B]
+        return logits
 
     def get_optimizer_groups(self, base_weight_decay: float):
         """Apply stronger regularization to the classifier to prevent memorization."""

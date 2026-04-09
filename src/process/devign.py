@@ -26,7 +26,8 @@ class Devign(Step):
         
         # Define loss logic — plain BCE without class weighting
         def weighted_loss(o, t):
-            return F.binary_cross_entropy_with_logits(o, t.view_as(o))
+            t = t.view_as(o)
+            return F.binary_cross_entropy_with_logits(o, t)
 
         param_groups = _model.get_optimizer_groups(weight_decay)
         self.optimizer = optim.Adam(param_groups, lr=learning_rate)

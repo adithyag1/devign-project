@@ -284,9 +284,9 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         print(f"\n[PROJECT: {p_label}] Samples: {len(p_test)}")
         p_loader = data.InputDataset(p_test).get_loader(context.batch_size, shuffle=False)
         p_step = process.LoaderStep(f"{p_name} Test", p_loader, DEVICE)
-        val_loader_for_thresh = data.InputDataset(val_df).get_loader(context.batch_size, shuffle=False)
-        val_step_for_thresh = process.LoaderStep("Val", val_loader_for_thresh, DEVICE)
-        process.predict(model, p_step, val_loader_step=val_step_for_thresh)
+        val_loader_for_threshold = data.InputDataset(val_df).get_loader(context.batch_size, shuffle=False)
+        val_step_for_threshold = process.LoaderStep("Validation (for threshold)", val_loader_for_threshold, DEVICE)
+        process.predict(model, p_step, val_loader_step=val_step_for_threshold)
         
 def main():
     """
