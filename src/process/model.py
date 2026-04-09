@@ -51,14 +51,14 @@ class TripleViewNet(nn.Module):
             nn.Linear(6 * jk_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.ReLU(),
-            nn.Dropout(0.5), # Increased dropout to 0.5
+            nn.Dropout(0.3),
         )
 
         # ─── Classifier ───
         self.classifier = nn.Sequential(
             nn.Linear(fusion_dim, 64),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(0.2),
             nn.Linear(64, 1),
         )
 
