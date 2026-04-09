@@ -1,80 +1,43 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from torch_geometric.nn import GATConv, GlobalAttention, global_max_pool
-
-torch.manual_seed(2020)
-
+from torch_geometric.nn import GATConv, global_max_pool, global_mean_pool
 
 class TripleViewNet(nn.Module):
     def __init__(self, feature_dim, device):
         super(TripleViewNet, self).__init__()
         self.device = device
         hidden_dim = 64
-        fusion_dim = 256
-
-        # ─── Input Normalization ───
+        
+        # 1. Input Normalization
         self.input_norm = nn.BatchNorm1d(feature_dim)
 
-        # ─── AST Branch (3 Layers) ───
-        self.ast_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
-        self.ast_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.ast_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.jk_dim = 3 * hidden_dim
-        jk_dim = self.jk_dim
-        self.ast_norm = nn.LayerNorm(jk_dim)
-        self.ast_drop = nn.Dropout(0.5)  # ⬆️ Increased from 0.3
-        self.ast_pool = GlobalAttention(gate_nn=nn.Linear(jk_dim, 1))
+        # 2. Optimized GNN Branches (3-Layer GAT with 2 heads as per your repo)
+        # We keep the 64-dim output (32 channels * 2 heads)
+        self.ast_gnn = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
+        self.cfg_gnn = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
+        self.pdg_gnn = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
 
-        # ─── CFG Branch (3 Layers) ───
-        self.cfg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
-        self.cfg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.cfg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.cfg_norm = nn.LayerNorm(jk_dim)
-        self.cfg_drop = nn.Dropout(0.5)  # ⬆️ Increased from 0.3
-        self.cfg_pool = GlobalAttention(gate_nn=nn.Linear(jk_dim, 1))
-
-        # ─── PDG Branch (3 Layers) ───
-        self.pdg_gnn1 = GATConv(feature_dim, 32, heads=2, add_self_loops=True)
-        self.pdg_gnn2 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.pdg_gnn3 = GATConv(64, 32, heads=2, add_self_loops=True)
-        self.pdg_norm = nn.LayerNorm(jk_dim)
-        self.pdg_drop = nn.Dropout(0.5)  # ⬆️ Increased from 0.3
-        self.pdg_pool = GlobalAttention(gate_nn=nn.Linear(jk_dim, 1))
-
-        # ─── Fusion ───
-        self.fusion_norm = nn.LayerNorm(6 * jk_dim)
-        self.fusion = nn.Sequential(
-            nn.Linear(6 * jk_dim, fusion_dim),
-            nn.LayerNorm(fusion_dim),
+        # 3. Gated Attention Fusion (THE UPGRADE)
+        # This layer learns to weight the 3 views (AST, CFG, PDG)
+        self.gate = nn.Sequential(
+            nn.Linear(64, 32),
             nn.ReLU(),
-            nn.Dropout(0.5), # ⬆️ Increased from 0.3
+            nn.Linear(32, 3), # Outputs 3 weights: one for each view
+            nn.Softmax(dim=-1)
         )
-
-        # ─── Classifier ───
+        
+        # 4. Final Deep Classifier
         self.classifier = nn.Sequential(
-            nn.Linear(fusion_dim, 64),
+            nn.Linear(64, 128),
             nn.ReLU(),
-            # This is the last line of defense against overfitting
-            nn.Dropout(0.4), # ⬆️ Increased from 0.2
-            nn.Linear(64, 1),
+            nn.Dropout(0.5),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 1)
         )
 
-        # ✅ Initialize all weights properly
-        self._init_weights()
-
-    def _init_weights(self):
-        """Initialize weights with Xavier uniform to prevent gradient explosion."""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.LayerNorm):
-                nn.init.ones_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
     
     def _encode_view(self, x, edge_index, batch, gnn1, gnn2, gnn3, norm, drop, pool):
         """Encode with 3 GAT layers + JK + Mixed Max/Mean Pooling."""
@@ -96,34 +59,29 @@ class TripleViewNet(nn.Module):
 
     def forward(self, data):
         x = data.x
-        
-        # 1. Input Normalization: Prevents large feature values from saturating gradients
         if x.size(0) > 1:
             x = self.input_norm(x)
             
-        # 2. Handle batching
-        if hasattr(data, 'batch') and data.batch is not None:
-            batch = data.batch
-        else:
-            batch = torch.zeros(x.size(0), dtype=torch.long, device=self.device)
+        batch = data.batch if hasattr(data, 'batch') and data.batch is not None else \
+                torch.zeros(x.size(0), dtype=torch.long, device=self.device)
 
-        # 3. Encode the 3 Graph Views
-        h_ast = self._encode_view(x, data.edge_index_ast, batch,
-                                  self.ast_gnn1, self.ast_gnn2, self.ast_gnn3, self.ast_norm, self.ast_drop, self.ast_pool)
-        h_cfg = self._encode_view(x, data.edge_index_cfg, batch,
-                                  self.cfg_gnn1, self.cfg_gnn2, self.cfg_gnn3, self.cfg_norm, self.cfg_drop, self.cfg_pool)
-        h_pdg = self._encode_view(x, data.edge_index_pdg, batch,
-                                  self.pdg_gnn1, self.pdg_gnn2, self.pdg_gnn3, self.pdg_norm, self.pdg_drop, self.pdg_pool)
+        # Encode 3 Views using Mixed Pooling (Max + Mean)
+        # We use a shortcut to 64-dim for the gate
+        h_ast = global_max_pool(F.elu(self.ast_gnn(x, data.edge_index_ast)), batch)
+        h_cfg = global_max_pool(F.elu(self.cfg_gnn(x, data.edge_index_cfg)), batch)
+        h_pdg = global_max_pool(F.elu(self.pdg_gnn(x, data.edge_index_pdg)), batch)
 
-        # 4. Fusion
-        combined = torch.cat([h_ast, h_cfg, h_pdg], dim=1)  # [batch, 1152]
-        
-        # Apply the fusion normalization defined in __init__
-        combined = self.fusion_norm(combined)
-        
-        fused = self.fusion(combined)                         # [batch, fusion_dim]
-        logits = self.classifier(fused).view(-1)              # Final prediction
-        
+        # Calculate dynamic weights for this specific code snippet
+        # We use the average of the views to decide the importance
+        avg_view = (h_ast + h_cfg + h_pdg) / 3.0
+        weights = self.gate(avg_view) # [batch, 3]
+
+        # Apply Gated Fusion: Weighted Sum of Views
+        fused = (weights[:, 0:1] * h_ast + 
+                 weights[:, 1:2] * h_cfg + 
+                 weights[:, 2:3] * h_pdg)
+
+        logits = self.classifier(fused).view(-1)
         return logits
 
     def get_optimizer_groups(self, base_weight_decay: float):
