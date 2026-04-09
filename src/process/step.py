@@ -12,22 +12,16 @@ def binary_accuracy(probs, labels):
 
 
 class Step:
-    def __init__(self, model, loss_function, optimizer, w0=1.0, w1=1.0):
+    def __init__(self, model, loss_function, optimizer, w0=1.0, w1=1.0, accumulation_steps=1):
         self.model = model
         self.criterion = loss_function
         self.optimizer = optimizer
         self.w0 = w0
         self.w1 = w1
-        # Gradient accumulation: update weights every N batches
-        self.accumulation_steps = 1
-        # Gradient clipping max norm (0 disables clipping)
-        # ✅ Increased from 1.0 (too aggressive) to 5.0
+        self.accumulation_steps = max(1, int(accumulation_steps))
         self.clip_grad_norm = 5.0
-        # Internal counter for accumulation
         self._accum_count = 0
-        # Start with clean gradients
         self.optimizer.zero_grad()
-        # Track max gradient norm for debugging
         self.max_grad_norm = 0
 
     def __call__(self, i, batch_data, y):

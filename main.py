@@ -165,7 +165,8 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         learning_rate=context.learning_rate,
         weight_decay=context.weight_decay,
         weight_0=context.weight_0,
-        weight_1=context.weight_1
+        weight_1=context.weight_1,
+        accumulation_steps=context.accumulation_steps
     )
     model.accumulation_steps = context.accumulation_steps or 1
 

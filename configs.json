@@ -23,12 +23,12 @@
         "feature_dim": 844
     },
     "process": {
-        "epochs": 100,
-        "batch_size": 32,        
-        "learning_rate": 5e-4,    
-        "weight_decay": 0.05,     
-        "accumulation_steps": 4,  
-        "patience": 20,           
-        "warmup_epochs": 5        
+        "epochs": 60,
+        "batch_size": 32,
+        "learning_rate": 1e-3,
+        "weight_decay": 1e-5,
+        "accumulation_steps": 4,
+        "patience": 10,
+        "warmup_epochs": 5
     }
 }
