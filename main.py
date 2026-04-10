@@ -165,7 +165,8 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         learning_rate=context.learning_rate,
         weight_decay=context.weight_decay,
         weight_0=context.weight_0,
-        weight_1=context.weight_1
+        weight_1=context.weight_1,
+        accumulation_steps=context.accumulation_steps
     )
     model.accumulation_steps = context.accumulation_steps or 1
 
@@ -283,7 +284,9 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         print(f"\n[PROJECT: {p_label}] Samples: {len(p_test)}")
         p_loader = data.InputDataset(p_test).get_loader(context.batch_size, shuffle=False)
         p_step = process.LoaderStep(f"{p_name} Test", p_loader, DEVICE)
-        process.predict(model, p_step)
+        val_loader_for_threshold = data.InputDataset(val_df).get_loader(context.batch_size, shuffle=False)
+        val_step_for_threshold = process.LoaderStep("Validation (for threshold)", val_loader_for_threshold, DEVICE)
+        process.predict(model, p_step, val_loader_step=val_step_for_threshold)
         
 def main():
     """

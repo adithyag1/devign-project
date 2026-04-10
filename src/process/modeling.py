@@ -1,7 +1,9 @@
 from ..utils.objects.metrics import Metrics
 import torch
 import time
+import numpy as np
 from ..utils import log as logger
+
 
 class Train(object):
     def __init__(self, step, epochs, verbose=False):
@@ -34,39 +36,75 @@ class Train(object):
                     return True
         return False
 
-def predict(step, test_loader_step):
-    print(f"Testing")
+
+def _collect_probs_labels(step, loader_step):
+    all_probs, all_labels = [], []
+    device = getattr(step, 'device', 'cpu')
+
     with torch.no_grad():
         step.model.eval()
-        all_outs = []
-        all_labels = []
-        device = getattr(step, 'device', 'cpu') 
+        for batch in loader_step.loader:
+            data_input = batch[0] if isinstance(batch, (tuple, list)) else batch
+            if hasattr(data_input, 'x'):
+                data_input = data_input.to(device)
+                probs = torch.sigmoid(step.model(data_input)).view(-1)
+                all_probs.append(probs.detach().cpu())
+                all_labels.append(data_input.y.detach().cpu().float().view(-1))
+
+    if not all_probs:
+        return None, None
+    return torch.cat(all_probs), torch.cat(all_labels)
+
+
+def _find_best_threshold_from_val(val_probs, val_labels):
+    best_t, best_acc = 0.5, -1.0
+    for t in np.arange(0.05, 0.951, 0.01):
+        pred = (val_probs >= t).float()
+        acc = (pred == val_labels).float().mean().item()
+        if acc > best_acc:
+            best_acc, best_t = acc, float(t)
+    return best_t, best_acc
+
+
+def predict(step, test_loader_step, val_loader_step=None, threshold=0.5):
+    print("Testing")
+
+    chosen_threshold = threshold
+    if val_loader_step is not None:
+        vp, vy = _collect_probs_labels(step, val_loader_step)
+        if vp is not None:
+            chosen_threshold, val_acc = _find_best_threshold_from_val(vp, vy)
+            print(f"  Threshold tuning: selected threshold={chosen_threshold:.2f}, val accuracy={val_acc:.4f}")
+
+    with torch.no_grad():
+        step.model.eval()
+        all_outs, all_labels = [], []
+        device = getattr(step, 'device', 'cpu')
 
         for batch in test_loader_step.loader:
             data_input = batch[0] if isinstance(batch, (tuple, list)) else batch
             if hasattr(data_input, 'x'):
                 data_input = data_input.to(device)
-                output = torch.sigmoid(step.model(data_input))
-                all_outs.append(output.detach().cpu())
-                all_labels.append(data_input.y.detach().cpu())
-            
+                out = torch.sigmoid(step.model(data_input)).view(-1)
+                all_outs.append(out.detach().cpu())
+                all_labels.append(data_input.y.detach().cpu().float().view(-1))
+
         if len(all_outs) == 0:
             print("Error: No valid graph data found.")
             return 0.0
 
-        flat_outs = torch.cat(all_outs, dim=0)
-        flat_labels = torch.cat(all_labels, dim=0)
-        
+        flat_outs = torch.cat(all_outs)
+        flat_labels = torch.cat(all_labels)
+
         print(f"  Prediction diagnostics:")
-        print(f"    Mean: {flat_outs.mean():.4f} | Std: {flat_outs.std():.4f} "
-              f"| Min: {flat_outs.min():.4f} | Max: {flat_outs.max():.4f}")
-        print(f"    Class distribution in test — "
-              f"Neg: {(flat_labels == 0).sum().item()} | Pos: {(flat_labels == 1).sum().item()}")
-        
-        metrics = Metrics(flat_outs, flat_labels)
+        print(f"    Mean: {flat_outs.mean():.4f} | Std: {flat_outs.std():.4f} | Min: {flat_outs.min():.4f} | Max: {flat_outs.max():.4f}")
+        print(f"    Class distribution in test — Neg: {(flat_labels == 0).sum().item()} | Pos: {(flat_labels == 1).sum().item()}")
+
+        pred_labels = (flat_outs >= chosen_threshold).float()
+        metrics = Metrics(pred_labels, flat_labels)
         print(metrics)
         metrics.log()
-        
+
     return metrics()["Accuracy"]
 
 class History:

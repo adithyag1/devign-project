@@ -196,8 +196,10 @@ def compute_class_weights(data_frame: pd.DataFrame):
     """Return (weight_0, weight_1) balanced class weights for a training DataFrame."""
     class_counts = data_frame['target'].value_counts()
     total = len(data_frame)
-    weight_0 = total / (2.0 * max(int(class_counts.get(0, 1)), 1))
-    weight_1 = total / (2.0 * max(int(class_counts.get(1, 1)), 1))
+    count_0 = int(class_counts.get(0, 1))
+    count_1 = int(class_counts.get(1, 1))
+    weight_0 = total / (2.0 * max(count_0, 1))
+    weight_1 = total / (2.0 * max(count_1, 1))
     return weight_0, weight_1
 
 

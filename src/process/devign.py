@@ -12,7 +12,8 @@ class Devign(Step):
                  learning_rate: float,
                  weight_decay: float,
                  weight_0: float,
-                 weight_1: float):
+                 weight_1: float,
+                 accumulation_steps: int = 1):
         self.path = path
         self.lr = learning_rate
         self.wd = weight_decay
@@ -23,13 +24,10 @@ class Devign(Step):
         # FIX: Define _model by moving the passed model to the device
         _model = model.to(device)
         
-        # Define weights and loss logic
+        # Define loss logic — plain BCE without class weighting
         def weighted_loss(o, t):
             t = t.view_as(o)
-            # Per-sample class weighting for better imbalance handling
-            sample_weights = torch.where(t == 0, self.w0, self.w1).to(o.device)
-            bce_loss = F.binary_cross_entropy_with_logits(o, t, reduction='none')
-            return (bce_loss * sample_weights).mean()
+            return F.binary_cross_entropy_with_logits(o, t)
 
         param_groups = _model.get_optimizer_groups(weight_decay)
         self.optimizer = optim.Adam(param_groups, lr=learning_rate)
@@ -41,11 +39,11 @@ class Devign(Step):
                          loss_function=weighted_loss,
                          optimizer=self.optimizer,
                          w0=weight_0,
-                         w1=weight_1
+                         w1=weight_1,
+                         accumulation_steps=accumulation_steps
                          )
 
-        # Re-assign after super().__init__() to ensure the passed values are used,
-        # not the defaults read from config inside Step.__init__()
+
         self.w0 = weight_0
         self.w1 = weight_1
 

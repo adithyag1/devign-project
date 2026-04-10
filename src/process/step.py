@@ -12,41 +12,31 @@ def binary_accuracy(probs, labels):
 
 
 class Step:
-    def __init__(self, model, loss_function, optimizer, w0=1.0, w1=1.0):
+    def __init__(self, model, loss_function, optimizer, w0=1.0, w1=1.0, accumulation_steps=1):
         self.model = model
         self.criterion = loss_function
         self.optimizer = optimizer
         self.w0 = w0
         self.w1 = w1
-        # Gradient accumulation: update weights every N batches
-        self.accumulation_steps = 1
-        # Gradient clipping max norm (0 disables clipping)
-        # ✅ Increased from 1.0 (too aggressive) to 5.0
+        self.accumulation_steps = max(1, int(accumulation_steps))
         self.clip_grad_norm = 5.0
-        # Internal counter for accumulation
         self._accum_count = 0
-        # Start with clean gradients
         self.optimizer.zero_grad()
-        # Track max gradient norm for debugging
         self.max_grad_norm = 0
 
     def __call__(self, i, batch_data, y):
-        # 1. The model now returns raw LOGITS (no sigmoid)
         logits = self.model(batch_data).view(-1)
         target = y.float()
-        
-        # 2. Convert logits to probabilities for stats/accuracy
-        # We need this because stats.Stat and binary_accuracy expect 0.0 to 1.0
+
+        # label smoothing
+        smooth = 0.05
+        target_smoothed = target * (1.0 - smooth) + 0.5 * smooth
+
         probs = torch.sigmoid(logits)
-        
-        # 3. Weighted Loss Logic using the Logit-stable function
-        loss_weights = torch.where(target == 0, self.w0, self.w1).to(target.device)
-        
-        # Use binary_cross_entropy_with_logits for numerical stability
-        raw_loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, target, reduction='none')
-        loss = (raw_loss * loss_weights).mean()
-        
-        # 4. Accuracy and Optimizer
+
+        # plain BCE-with-logits (no class-weight scaling)
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, target_smoothed)
+
         acc = binary_accuracy(probs, target)
 
         if self.model.training:
