@@ -1,0 +1,239 @@
+{
+  "function_name": "test",
+  "source_file": "test.c",
+  "prediction": "vulnerable",
+  "confidence": 0.521022,
+  "vulnerable_nodes": [
+    {
+      "code": "char *str",
+      "line": "1",
+      "type": "Local"
+    },
+    {
+      "code": "void",
+      "line": "1",
+      "type": "Member"
+    },
+    {
+      "code": "char[10] buffer",
+      "line": "2",
+      "type": "MetaData"
+    },
+    {
+      "code": "strcpy(buffer, str)",
+      "line": "3",
+      "type": "Method"
+    },
+    {
+      "code": "char[10] buffer",
+      "line": "3",
+      "type": "MethodInst"
+    },
+    {
+      "code": "char str",
+      "line": "3",
+      "type": "MethodParameterIn"
+    }
+  ],
+  "vulnerability_paths": {
+    "ast": [
+      {
+        "from_code": "strcpy(buffer, str)",
+        "from_line": "3",
+        "to_code": "char[10] buffer",
+        "to_line": "3",
+        "importance": 0.8695716261863708
+      },
+      {
+        "from_code": "strcpy(buffer, str)",
+        "from_line": "3",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.8499358296394348
+      },
+      {
+        "from_code": "void",
+        "from_line": "1",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.8378108739852905
+      },
+      {
+        "from_code": "void",
+        "from_line": "1",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.8126071095466614
+      },
+      {
+        "from_code": "void",
+        "from_line": "1",
+        "to_code": "char[10] buffer",
+        "to_line": "2",
+        "importance": 0.8047144412994385
+      },
+      {
+        "from_code": "strcpy(buffer, str)",
+        "from_line": "3",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.8033523559570312
+      },
+      {
+        "from_code": "void",
+        "from_line": "1",
+        "to_code": "char[10] buffer",
+        "to_line": "2",
+        "importance": 0.7937501668930054
+      },
+      {
+        "from_code": "strcpy(buffer, str)",
+        "from_line": "3",
+        "to_code": "char[10] buffer",
+        "to_line": "3",
+        "importance": 0.775756299495697
+      }
+    ],
+    "cfg": [
+      {
+        "from_code": "char[10] buffer",
+        "from_line": "3",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.8982186913490295
+      },
+      {
+        "from_code": "char str",
+        "from_line": "3",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.8596765995025635
+      },
+      {
+        "from_code": "char str",
+        "from_line": "3",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.838427722454071
+      },
+      {
+        "from_code": "char[10] buffer",
+        "from_line": "3",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.8156175017356873
+      },
+      {
+        "from_code": "strcpy(buffer, str)",
+        "from_line": "3",
+        "to_code": "void",
+        "to_line": "1",
+        "importance": 0.788237452507019
+      },
+      {
+        "from_code": "strcpy(buffer, str)",
+        "from_line": "3",
+        "to_code": "void",
+        "to_line": "1",
+        "importance": 0.7530460953712463
+      }
+    ],
+    "pdg": [
+      {
+        "from_code": "char[10] buffer",
+        "from_line": "3",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.9201803803443909
+      },
+      {
+        "from_code": "char str",
+        "from_line": "3",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.9106988906860352
+      },
+      {
+        "from_code": "char str",
+        "from_line": "3",
+        "to_code": "char[10] buffer",
+        "to_line": "3",
+        "importance": 0.8710066080093384
+      },
+      {
+        "from_code": "char[10] buffer",
+        "from_line": "3",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.8691582679748535
+      },
+      {
+        "from_code": "char[10] buffer",
+        "from_line": "3",
+        "to_code": "void",
+        "to_line": "1",
+        "importance": 0.8643577694892883
+      },
+      {
+        "from_code": "char *str",
+        "from_line": "1",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.8625112175941467
+      },
+      {
+        "from_code": "char *str",
+        "from_line": "1",
+        "to_code": "char str",
+        "to_line": "3",
+        "importance": 0.8472663760185242
+      },
+      {
+        "from_code": "char[10] buffer",
+        "from_line": "3",
+        "to_code": "strcpy(buffer, str)",
+        "to_line": "3",
+        "importance": 0.8471155762672424
+      }
+    ]
+  },
+  "edge_masks": {
+    "ast": [
+      0.8047144412994385,
+      0.8378108739852905,
+      0.7937501668930054,
+      0.8126071095466614,
+      0.775756299495697,
+      0.8499358296394348,
+      0.8695716261863708,
+      0.8033523559570312
+    ],
+    "cfg": [
+      0.838427722454071,
+      0.788237452507019,
+      0.8982186913490295,
+      0.8156175017356873,
+      0.8596765995025635,
+      0.7530460953712463
+    ],
+    "pdg": [
+      0.8625112175941467,
+      0.8471155762672424,
+      0.8013041615486145,
+      0.7549416422843933,
+      0.8710066080093384,
+      0.9201803803443909,
+      0.8691582679748535,
+      0.7551383376121521,
+      0.8472663760185242,
+      0.7850760221481323,
+      0.7630115747451782,
+      0.9106988906860352,
+      0.8035058379173279,
+      0.8643577694892883,
+      0.8306795954704285,
+      0.8440900444984436
+    ]
+  },
+  "summary": "Status: VULNERABLE. Found 22 critical edges across 3 views (AST:8, CFG:6, PDG:8). Key operations: char *str, void, char[10] buffer."
+}
