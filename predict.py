@@ -11,13 +11,14 @@ from cfexplainer_wrapper import (
     print_explanation_report,
     save_explanation_report,
 )
+import configs
 
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 
 
 # --- CONFIGURATION ---
-JOERN_PATH = "joern/joern-cli/"
+JOERN_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "joern", "joern-cli"))
 MODEL_PATH = "data/model/checkpoint.pt"
 TEMP_DIR = "data/demo/"
 REPORT_PATH = "data/demo/explanation_report.json"
@@ -78,7 +79,8 @@ def predict_single_file(c_file_path):
 
     # 5. LOAD MODEL AND RUN INFERENCE
     print("[*] Running Model Inference...")
-    model = TripleViewNet(feature_dim=775, device=DEVICE)
+    embed = configs.Embed()
+    model = TripleViewNet(feature_dim=embed.feature_dim, device=DEVICE)
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
     model.load_state_dict(checkpoint)
     model.eval()
