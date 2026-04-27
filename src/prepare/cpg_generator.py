@@ -80,11 +80,15 @@ def joern_create(joern_path, in_path, out_path, cpg_files):
             if os.path.exists(script_out_name):
                 os.remove(script_out_name)
 
+            base_script_content = None
+            with open(base_script,"r") as f:
+                base_script_content = f.read()
+            
             tmp_script_path = os.path.abspath("tmp_export.sc")
             with open(tmp_script_path, "w") as f:
                 f.write(f'importCpg("{cpg_full_path}")\n')
-                f.write(f'runScript("{base_script}", Map.empty[String, String], cpg)\n')
-                f.write(f'delete\n')
+                f.write(base_script_content)
+                f.write(f'\ndelete\n')
 
             try:
                 custom_env = os.environ.copy()
