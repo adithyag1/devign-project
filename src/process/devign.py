@@ -20,11 +20,7 @@ class Devign(Step):
         self.device = device
         
         log.log_info('devign', f"LR: {self.lr}; WD: {self.wd}; W0: {weight_0}; W1: {weight_1}")
-        
-        # FIX: Define _model by moving the passed model to the device
         _model = model.to(device)
-        
-        # Define loss logic — plain BCE without class weighting
         def weighted_loss(o, t):
             t = t.view_as(o)
             return F.binary_cross_entropy_with_logits(o, t)

@@ -5,15 +5,12 @@ import os.path
 import os
 import time
 from .cpg_client_wrapper import CPGClientWrapper
-#from ..data import datamanager as data
 
 
 def funcs_to_graphs(funcs_path):
     client = CPGClientWrapper()
-    # query the cpg for the dataset
     print(f"Creating CPG.")
     graphs_string = client(funcs_path)
-    # removes unnecessary namespace for object references
     graphs_string = re.sub(r"io\.shiftleft\.codepropertygraph\.generated\.", '', graphs_string)
     graphs_json = json.loads(graphs_string)
 
@@ -25,7 +22,6 @@ def graph_indexing(graph):
     del graph["file"]
     return idx, {"functions": [graph]}
 """
-#changed
 def graph_indexing(graph):
     try:
         file_path = graph["file"]
@@ -39,9 +35,6 @@ def graph_indexing(graph):
 
 def joern_parse(joern_path, input_path, output_path, file_name):
     out_file = file_name + ".bin"
-    
-    # 1. ENSURE THE DIRECTORY EXISTS
-    # This was the cause of your "nio:/.../data/cpg" error
     if not os.path.exists(output_path):
         os.makedirs(output_path, exist_ok=True)
     
@@ -67,10 +60,8 @@ def joern_parse(joern_path, input_path, output_path, file_name):
 
 def joern_create(joern_path, in_path, out_path, cpg_files):
     json_files = []
-    # Resolve the devign_project root from src/prepare/
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     joern_bin = os.path.join(project_root, "joern", "joern-cli", "joern")
-    # Updated to the singular filename
     base_script = os.path.join(project_root, "joern", "graph-for-funcs.sc")
     
     if not os.path.exists(out_path):
@@ -85,8 +76,6 @@ def joern_create(joern_path, in_path, out_path, cpg_files):
         
         if os.path.exists(cpg_full_path):
             print(f"Exporting JSON for {cpg_file}...")
-            
-            # The Scala script writes this to the current working directory (project root)
             script_out_name = os.path.join(os.getcwd(), "last_graph_export.json")
             if os.path.exists(script_out_name):
                 os.remove(script_out_name)
@@ -98,7 +87,6 @@ def joern_create(joern_path, in_path, out_path, cpg_files):
                 f.write(f'delete\n')
 
             try:
-                # Set Java heap to 10GB for memory-intensive graph exports
                 custom_env = os.environ.copy()
                 custom_env["JAVA_OPTS"] = "-Xmx10g"
 
@@ -107,8 +95,6 @@ def joern_create(joern_path, in_path, out_path, cpg_files):
                     check=True, capture_output=True, text=True,
                     env=custom_env
                 )
-                
-                # Move the file to data/cpg/ once generated
                 if os.path.exists(script_out_name):
                     os.rename(script_out_name, json_out_path)
                     print(f"Successfully created {json_file_name}")
@@ -141,8 +127,6 @@ def json_process(in_path, json_file):
             cpg_string = re.sub(r"io\.shiftleft\.codepropertygraph\.generated\.", '', cpg_string)
             try:
                 cpg_json = json.loads(cpg_string)
-                
-                # GROUP functions by source file
                 functions_by_file = {}
                 for graph in cpg_json["functions"]:
                     if graph["file"] != "N/A" and graph["file"] != "<empty>":
@@ -151,13 +135,8 @@ def json_process(in_path, json_file):
                         try:
                             idx = int(file_id)
                             func_name = graph.get("function", "")
-                            
-                            # SKIP synthetic functions
                             if "<global>" in func_name or func_name == "START_TEST" or func_name.startswith("<"):
                                 continue
-                            
-                            # Keep ONLY the first real function per file
-                            # (There should be exactly one after filtering)
                             if idx not in functions_by_file:
                                 functions_by_file[idx] = graph
                         except:
@@ -172,26 +151,3 @@ def json_process(in_path, json_file):
                 print(f"Error: Failed to decode JSON in {json_file}")
                 return None
     return None
-'''
-def generate(dataset, funcs_path):
-    dataset_size = len(dataset)
-    print("Size: ", dataset_size)
-    graphs = funcs_to_graphs(funcs_path[2:])
-    print(f"Processing CPG.")
-    container = [graph_indexing(graph) for graph in graphs["functions"] if graph["file"] != "N/A"]
-    graph_dataset = data.create_with_index(container, ["Index", "cpg"])
-    print(f"Dataset processed.")
-
-    return data.inner_join_by_index(dataset, graph_dataset)
-'''
-
-# client = CPGClientWrapper()
-# client.create_cpg("../../data/joern/")
-# joern_parse("../../joern/joern-cli/", "../../data/joern/", "../../joern/joern-cli/", "gen_test")
-# print(funcs_to_graphs("/data/joern/"))
-"""
-while True:
-    raw = input("query: ")
-    response = client.query(raw)
-    print(response)
-"""

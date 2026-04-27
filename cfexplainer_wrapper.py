@@ -1,18 +1,9 @@
-"""
-cfexplainer_wrapper.py
-
-Wraps CFExplainer to extract explanatory subgraphs with actual code snippets
-and line numbers, providing human-readable vulnerability analysis reports.
-"""
-
 import json
 import os
 import torch
 import numpy as np
 
 from cfexplainer_standalone import StandaloneCFExplainer as CFExplainer
-
-# Node label mapping (from src/utils/objects/cpg/node.py)
 NODE_LABELS = {
     0: "Block",
     1: "Call",
@@ -37,10 +28,6 @@ NODE_LABELS = {
     20: "TypeDecl",
     21: "Unknown",
 }
-
-# Node labels that represent metadata rather than executable code.
-# MethodParameterOut / MethodReturn carry only return-type information;
-# Type nodes are pure type declarations.  None of these have meaningful CODE.
 METADATA_NODE_TYPES = {"MethodParameterOut", "MethodReturn", "Type"}
 
 
@@ -65,10 +52,6 @@ class ExplanationExtractor:
         self.explainer = CFExplainer(model=model, epochs=epochs)
         self.explainer.device = device
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def get_explanation_with_code(self, pyg_data, nodes_dict, pred_label):
         """
         Run CFExplainer and return a fully annotated explanation dict.
@@ -86,10 +69,7 @@ class ExplanationExtractor:
               - vulnerability_paths: edge paths per view with from/to code
               - summary:             human-readable one-line summary
         """
-        # Build an index list so we can map int positions → node objects
         node_list = list(nodes_dict.values())
-
-        # Run CFExplainer
         explanation = self.explainer(pyg_data, target_label=pred_label)
 
         edge_masks = {
@@ -109,8 +89,6 @@ class ExplanationExtractor:
             top_edges[view] = self._top_k_edges(
                 edge_masks[view], edge_indices[view], self.top_k
             )
-
-        # Collect unique vulnerable node indices across all views
         vulnerable_node_indices = set()
         for view in ("ast", "cfg", "pdg"):
             if top_edges[view].shape[1] > 0:
@@ -120,8 +98,6 @@ class ExplanationExtractor:
         vulnerable_nodes = self._nodes_to_info(
             sorted(vulnerable_node_indices), node_list
         )
-
-        # Build edge paths (from_node → to_node with importance score)
         vulnerability_paths = {}
         for view in ("ast", "cfg", "pdg"):
             vulnerability_paths[view] = self._build_paths(
@@ -141,10 +117,6 @@ class ExplanationExtractor:
             "vulnerability_paths": vulnerability_paths,
             "summary": summary,
         }
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _top_k_edges(mask, edge_index, k):
@@ -186,39 +158,24 @@ class ExplanationExtractor:
         """
         label_name = ExplanationExtractor._get_label_name(node.label)
         line = node.get_line_number()
-
-        # Primary: node.get_code() delegates to Properties.code(), which returns
-        # None when CODE is absent or equals the Joern "<empty>" placeholder.
         code = node.get_code()
-
-        # Metadata-only nodes (return-type / output-parameter / type declarations)
-        # have no executable CODE.  Mark them so they can be filtered downstream.
         if label_name in METADATA_NODE_TYPES and code is None:
             return {"code": "<no-code>", "line": line, "type": label_name}
-
-        # Defense-in-depth: strip any residual "<empty>" token that may have
-        # slipped through (e.g. a code string like "<empty> strcpy(buffer, str)").
         if code and "<empty>" in code:
             code = code.replace("<empty>", "").strip() or None
 
         if code is None:
-            # No CODE property – fall back to TYPE_FULL_NAME
             node_type = node.properties.get_type()
             if node_type and node_type.strip() and node_type != "ANY":
                 code = node_type
 
         if not code or code.strip() == "":
-            # Try to get METHOD_FULL_NAME (for operators)
             method_name = node.properties.pairs.get("METHOD_FULL_NAME", "")
             if method_name and method_name.strip():
-                # Extract just the operator/method name
                 code = method_name.split(".")[-1]
 
         if not code or code.strip() == "":
-            # Use node label as fallback
             code = f"{label_name}"
-
-        # Final cleanup
         code = str(code).strip() if code else "<no-info>"
         if not code:
             code = "<no-info>"
@@ -226,12 +183,6 @@ class ExplanationExtractor:
         return {"code": code, "line": line, "type": label_name}
 
     def _nodes_to_info(self, indices, node_list):
-        """Convert a list of integer node positions to info dicts (deduplicated).
-
-        Nodes marked as ``<no-code>`` (metadata-only nodes such as
-        MethodParameterOut, MethodReturn, and Type) are silently dropped so
-        that only entries with actual executable code reach the caller.
-        """
         seen_codes = set()
         result = []
         for i in indices:
@@ -247,11 +198,6 @@ class ExplanationExtractor:
         return result
 
     def _build_paths(self, top_edge_arr, mask, edge_index, node_list, k):
-        """
-        Build a list of edge path dicts sorted by descending importance.
-
-        Each dict: {from_code, from_line, to_code, to_line, importance}
-        """
         if mask.numel() == 0 or edge_index.size(1) == 0:
             return []
 
@@ -290,11 +236,6 @@ class ExplanationExtractor:
             f"({view_counts}). Key operations: {ops_str}."
         )
 
-
-# ------------------------------------------------------------------
-# Report generation helpers
-# ------------------------------------------------------------------
-
 def print_explanation_report(func_name, source_file, probability, explanation):
     """Print a concise, elegant vulnerability report to stdout."""
     pred_label = explanation.get("target_label", int(probability > 0.5))
@@ -303,8 +244,6 @@ def print_explanation_report(func_name, source_file, probability, explanation):
     summary = explanation["summary"]
 
     width = 80
-    
-    # Filter out noise: only keep nodes with actual code
     important_nodes = [
         n for n in vulnerable_nodes 
         if n["code"] and n["code"] not in ("<no-info>", "<no-code>") and n["line"]
@@ -318,26 +257,21 @@ def print_explanation_report(func_name, source_file, probability, explanation):
     status_text = "[!] VULNERABLE" if probability > 0.5 else "[+] CLEAN"
     print(f"Prediction   : {status_text} ({probability:.1%})")
     print("=" * width)
-
-    # Show critical code lines
     if important_nodes:
         print(f"\n[*] CRITICAL CODE LINES ({len(important_nodes)} identified):\n")
-        for i, node in enumerate(important_nodes[:5], 1):  # Top 5 only
+        for i, node in enumerate(important_nodes[:5], 1):
             line_str = f"Line {node['line']}" if node["line"] is not None else "Unknown"
             print(f"    {i}. {line_str}: {node['code']}")
-
-    # Show data flow paths (top 1 per view)
     print(f"\n[*] VULNERABILITY DATA FLOW:\n")
     for view in ("ast", "cfg", "pdg"):
         paths = vulnerability_paths.get(view, [])
-        # Skip paths that involve metadata-only nodes
         paths = [
             p for p in paths
             if p["from_code"] not in ("<no-code>", "<no-info>")
             and p["to_code"] not in ("<no-code>", "<no-info>")
         ]
         if paths:
-            top_path = paths[0]  # Only show the most important path
+            top_path = paths[0]
             from_line = f"Line {top_path['from_line']}" if top_path['from_line'] else "?"
             to_line = f"Line {top_path['to_line']}" if top_path['to_line'] else "?"
             importance = top_path['importance']

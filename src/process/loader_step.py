@@ -14,10 +14,7 @@ class LoaderStep:
         progress_bar = tqdm(self.loader, desc=f"{self.name} Step", leave=False)
 
         for i, batch in enumerate(progress_bar):
-            # RE-ASSIGN the batch to the device
-            batch = batch.to(self.device) 
-            
-            # Now batch.y and all edge_indices are on the device
+            batch = batch.to(self.device)
             stat: stats.Stat = step(i, batch, batch.y)
             self.stats(stat)
 

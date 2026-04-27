@@ -13,11 +13,9 @@ class Train(object):
         self.verbose = verbose
 
     def __call__(self, train_loader_step, val_loader_step=None, early_stopping=None, current_epoch=1):
-        # We only run 1 epoch per call because main.py handles the outer loop
         for _ in range(self.epochs):
             self.step.train()
             train_stats = train_loader_step(self.step)
-            # Update history with the actual epoch number from main.py
             self.history(train_stats, current_epoch)
 
             if val_loader_step is not None:
@@ -31,7 +29,6 @@ class Train(object):
 
             if early_stopping is not None and val_loader_step is not None:
                 valid_loss = val_stats.loss()
-                # If early stopping triggers, return True to signal main.py to stop
                 if early_stopping(valid_loss):
                     return True
         return False
@@ -115,11 +112,9 @@ class History:
 
     def __call__(self, stats, epoch):
         self.epoch = epoch
-        # We overwrite the list so we only show the LATEST chunk's performance in console
         self.history[epoch] = [stats]
 
     def __str__(self):
-        # Prevents the "growing" string problem
         stats = ' - '.join([f"{res}" for res in self.current()])
         return f"{stats}"
 

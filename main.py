@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
     This module is intended to join all the pipeline in separated tasks
     to be executed individually or in a flow by using command-line options
@@ -51,9 +50,7 @@ def create_task():
     slices = [(s, slice.apply(lambda x: x)) for s, slice in slices]
 
     cpg_files = []
-    # Create CPG binary files
     for s, slice in slices:
-        # SKIP if .bin already exists to reuse your 150 minutes of work
         bin_file_name = f"{s}_{FILES.cpg}.bin"
         if os.path.exists(os.path.join(PATHS.cpg, bin_file_name)):
             cpg_files.append(bin_file_name)
@@ -65,7 +62,6 @@ def create_task():
         cpg_files.append(cpg_file)
         print(f"Dataset {s} to cpg.")
         shutil.rmtree(PATHS.joern)
-    # Create CPG with graphs json files
     json_files = prepare.joern_create(context.joern_cli_dir, PATHS.cpg, PATHS.cpg, cpg_files)
     for (s, slice), json_file in zip(slices, json_files):
         graphs = prepare.json_process(PATHS.cpg, json_file)
@@ -83,8 +79,6 @@ def create_task():
 def embed_task():
     context = configs.Embed()
     dataset_files = data.get_directory_files(PATHS.cpg)
-    
-    # 1. Load CodeBERT once globally for the task
     print("Loading CodeBERT to memory...")
     import os
     os.environ['HF_HUB_TIMEOUT'] = '600'
@@ -95,29 +89,21 @@ def embed_task():
     torch.cuda.empty_cache()
     gc.collect()
     print("Memory cleared after loading model")
-    
-    # 2. Pre-instantiate the embedding engine (node-level)
     node_embed_instance = prepare.NodesEmbedding(tokenizer, model, DEVICE)
     
     for pkl_file in dataset_files:
         file_name = pkl_file.split(".")[0]
         cpg_dataset = data.load(PATHS.cpg, pkl_file)
-        
-        # 3. Parse CPG to nodes (Structural parsing)
         print(f"Parsing CPG nodes for {file_name}...")
         cpg_dataset["nodes"] = cpg_dataset.apply(
-            lambda row: cpg.parse_to_nodes(row.cpg, 100000), axis=1 # Large value to not truncate
+            lambda row: cpg.parse_to_nodes(row.cpg, 100000), axis=1
         )
         cpg_dataset = cpg_dataset.loc[cpg_dataset.nodes.map(len) > 0]
-        
-        # 4. Embed using a loop with a progress bar
         print(f"Embedding {len(cpg_dataset)} functions with CodeBERT...")
         inputs = []
         total_ast_edges = 0
         total_cfg_edges = 0
         total_pdg_edges = 0
-        
-        # tqdm gives you a visual progress bar and ETA
         for index, row in tqdm(cpg_dataset.iterrows(), total=len(cpg_dataset), desc="Processing"):
             graph_data = prepare.nodes_to_input(
                 row.nodes,
@@ -136,8 +122,6 @@ def embed_task():
               f"PDG: {total_pdg_edges/num_functions:.1f}")
         
         cpg_dataset["input"] = inputs
-        
-        # 5. Cleanup and Save
         data.drop(cpg_dataset, ["nodes"])
         print(f"Saving input dataset {file_name}...")
         data.write(cpg_dataset[["input", "target"]], PATHS.input, f"{file_name}_{FILES.input}")
@@ -169,37 +153,20 @@ def process_task(use_early_stopping=False, evaluate_only=False):
         accumulation_steps=context.accumulation_steps
     )
     model.accumulation_steps = context.accumulation_steps or 1
-
-    # ── Global stratified split ──────────────────────────────────────────────
-    # Loads ALL input files once and performs a SINGLE stratified 80/10/10
-    # split across the entire dataset.  Split indices are cached in
-    # data/split_indices.pkl so that training and evaluation always use the
-    # exact same disjoint subsets.
     print("Loading global train/val/test split...")
     train_df, val_df, test_df = data.global_train_val_test_split(PATHS.input, "data/")
-    
-    # Recover original indices to map projects
     print("Recovering project labels...")
-    raw_df = data.read(PATHS.raw, FILES.raw) # This must be the full dataset.json
+    raw_df = data.read(PATHS.raw, FILES.raw)
     
     import pickle
     with open("data/split_indices.pkl", 'rb') as f:
         indices = pickle.load(f)
     
     test_indices = indices['test']
-    
-    # CRITICAL: Use the original Index column if it exists, otherwise iloc
-    # We use 'values' to ensure alignment with the reset_index test_df
     test_df['project'] = raw_df.iloc[test_indices]['project'].values
-
-    # DEBUG PRINT: Check what is actually in the project column
     print(f"Project counts in Test Set:\n{test_df['project'].value_counts(dropna=False)}")
-    
-    # Compute class weights from the training set only
     weight_0, weight_1 = data.compute_class_weights(train_df)
     model.update_weights(weight_0, weight_1)
-
-    # --- Model diagnostics ---
     total_params = sum(p.numel() for p in model_obj.parameters())
     trainable_params = sum(p.numel() for p in model_obj.parameters() if p.requires_grad)
     print(f"\n{'='*25} MODEL DIAGNOSTICS {'='*25}")
@@ -213,8 +180,6 @@ def process_task(use_early_stopping=False, evaluate_only=False):
     print(f"Val   split: {len(val_df)} samples")
     print(f"Test  split: {len(test_df)} samples")
     print(f"{'='*60}\n")
-
-    # Build DataLoaders once – PyTorch resets the iterator each epoch automatically
     train_loader = data.InputDataset(train_df).get_loader(context.batch_size, shuffle=context.shuffle)
     val_loader   = data.InputDataset(val_df).get_loader(context.batch_size, shuffle=False)
     test_loader  = data.InputDataset(test_df).get_loader(context.batch_size, shuffle=False)
@@ -233,8 +198,6 @@ def process_task(use_early_stopping=False, evaluate_only=False):
 
         for epoch in range(context.epochs):
             print(f"\n{'='*20} Epoch {epoch+1}/{context.epochs} {'='*20}")
-
-            # Linear LR warm-up
             if warmup_epochs > 0 and epoch < warmup_epochs:
                 warmup_lr = base_lr * (epoch + 1) / warmup_epochs
                 for param_group in model.optimizer.param_groups:
@@ -245,8 +208,6 @@ def process_task(use_early_stopping=False, evaluate_only=False):
             val_step   = process.LoaderStep("Validation", val_loader, DEVICE)
 
             trainer(train_step, val_step, early_stopping=None, current_epoch=epoch + 1)
-
-            # Retrieve per-epoch global metrics directly from LoaderStep
             train_loss = train_step.stats.loss()
             train_acc  = train_step.stats.acc()
             val_loss   = val_step.stats.loss()
@@ -254,12 +215,8 @@ def process_task(use_early_stopping=False, evaluate_only=False):
 
             print(f"  Train → Loss: {train_loss:.4f} | Acc: {train_acc:.4f}")
             print(f"  Val   → Loss: {val_loss:.4f}   | Acc: {val_acc:.4f}")
-
-            # Step the LR scheduler after warm-up
             if hasattr(model, 'scheduler') and epoch >= warmup_epochs:
                 model.scheduler.step(val_loss)
-
-            # Early stopping on global validation loss / manual checkpoint
             if use_early_stopping:
                 if early_stopping(val_loss):
                     print(f"Early stopping triggered at Epoch {epoch + 1}.")
@@ -269,10 +226,7 @@ def process_task(use_early_stopping=False, evaluate_only=False):
 
     else:
         model.load()
-
-    # ── Final evaluation on the held-out test set ────────────────────────────
     print("\n" + "=" * 25 + " PROJECT-SPECIFIC EVALUATION " + "=" * 25)
-    # Use the actual unique values found in the mapping to avoid missing anything
     for p_name in test_df['project'].unique():
         if pd.isna(p_name):
             p_test = test_df[test_df['project'].isna()]
@@ -309,16 +263,10 @@ def main():
         embed_task()
     if args.split:
         split_task()
-
-    # Standard training (No early stopping)
     if args.process:
         process_task(use_early_stopping=False, evaluate_only=False)
-
-    # Training WITH early stopping
     elif args.stopping:
         process_task(use_early_stopping=True, evaluate_only=False)
-
-    # Evaluation Only
     elif args.eval:
         process_task(evaluate_only=True)
 
